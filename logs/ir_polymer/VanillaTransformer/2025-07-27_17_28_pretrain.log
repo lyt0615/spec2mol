@@ -1,0 +1,368 @@
+INFO:{'net': 'VanillaTransformer', 'ds': 'ir_pretrain', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'VanillaTransformer', 'ds': 'ir_pretrain', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'VanillaTransformer', 'ds': 'ir_pretrain', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'VanillaTransformer', 'ds': 'ir_pretrain', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'VanillaTransformer', 'ds': 'ir_pretrain', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'VanillaTransformer', 'ds': 'ir_pretrain', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'VanillaTransformer', 'ds': 'ir_pretrain', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:VanillaTransformerEncoder(
+  (spectral_encoding): SpectralEncoding(
+    (encoding): Conv1d(1, 512, kernel_size=(8,), stride=(8,), bias=False)
+    (norm): LayerNorm()
+  )
+  (positional_encoding): LearnablePositionalEncoding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (class_encoding): LearnableClassEmbedding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (layers): ModuleList(
+    (0-5): 6 x EncoderLayer(
+      (self_attn): MultiHeadedAttention(
+        (linears): ModuleList(
+          (0-3): 4 x Linear(in_features=512, out_features=512, bias=True)
+        )
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (feed_forward): PositionwiseFeedForward(
+        (w_1): Linear(in_features=512, out_features=2048, bias=True)
+        (w_2): Linear(in_features=2048, out_features=512, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (sublayer): ModuleList(
+        (0-1): 2 x SublayerConnection(
+          (norm): LayerNorm()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+  )
+  (norm): LayerNorm()
+  (proj): Linear(in_features=512, out_features=1024, bias=True)
+  (fc): Sequential(
+    (0): Flatten(start_dim=1, end_dim=-1)
+    (1): Linear(in_features=512, out_features=1024, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=1024, out_features=1024, bias=True)
+    (4): ReLU()
+    (5): Linear(in_features=1024, out_features=1024, bias=True)
+    (6): ReLU()
+  )
+  (fc_head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:{'net': 'VanillaTransformer', 'ds': 'ir_pretrain', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:VanillaTransformerEncoder(
+  (spectral_encoding): SpectralEncoding(
+    (encoding): Conv1d(1, 512, kernel_size=(8,), stride=(8,), bias=False)
+    (norm): LayerNorm()
+  )
+  (positional_encoding): LearnablePositionalEncoding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (class_encoding): LearnableClassEmbedding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (layers): ModuleList(
+    (0-5): 6 x EncoderLayer(
+      (self_attn): MultiHeadedAttention(
+        (linears): ModuleList(
+          (0-3): 4 x Linear(in_features=512, out_features=512, bias=True)
+        )
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (feed_forward): PositionwiseFeedForward(
+        (w_1): Linear(in_features=512, out_features=2048, bias=True)
+        (w_2): Linear(in_features=2048, out_features=512, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (sublayer): ModuleList(
+        (0-1): 2 x SublayerConnection(
+          (norm): LayerNorm()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+  )
+  (norm): LayerNorm()
+  (proj): Linear(in_features=512, out_features=1024, bias=True)
+  (fc): Sequential(
+    (0): Flatten(start_dim=1, end_dim=-1)
+    (1): Linear(in_features=512, out_features=1024, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=1024, out_features=1024, bias=True)
+    (4): ReLU()
+    (5): Linear(in_features=1024, out_features=1024, bias=True)
+    (6): ReLU()
+  )
+  (fc_head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:VanillaTransformerEncoder(
+  (spectral_encoding): SpectralEncoding(
+    (encoding): Conv1d(1, 512, kernel_size=(8,), stride=(8,), bias=False)
+    (norm): LayerNorm()
+  )
+  (positional_encoding): LearnablePositionalEncoding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (class_encoding): LearnableClassEmbedding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (layers): ModuleList(
+    (0-5): 6 x EncoderLayer(
+      (self_attn): MultiHeadedAttention(
+        (linears): ModuleList(
+          (0-3): 4 x Linear(in_features=512, out_features=512, bias=True)
+        )
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (feed_forward): PositionwiseFeedForward(
+        (w_1): Linear(in_features=512, out_features=2048, bias=True)
+        (w_2): Linear(in_features=2048, out_features=512, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (sublayer): ModuleList(
+        (0-1): 2 x SublayerConnection(
+          (norm): LayerNorm()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+  )
+  (norm): LayerNorm()
+  (proj): Linear(in_features=512, out_features=1024, bias=True)
+  (fc): Sequential(
+    (0): Flatten(start_dim=1, end_dim=-1)
+    (1): Linear(in_features=512, out_features=1024, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=1024, out_features=1024, bias=True)
+    (4): ReLU()
+    (5): Linear(in_features=1024, out_features=1024, bias=True)
+    (6): ReLU()
+  )
+  (fc_head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:VanillaTransformerEncoder(
+  (spectral_encoding): SpectralEncoding(
+    (encoding): Conv1d(1, 512, kernel_size=(8,), stride=(8,), bias=False)
+    (norm): LayerNorm()
+  )
+  (positional_encoding): LearnablePositionalEncoding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (class_encoding): LearnableClassEmbedding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (layers): ModuleList(
+    (0-5): 6 x EncoderLayer(
+      (self_attn): MultiHeadedAttention(
+        (linears): ModuleList(
+          (0-3): 4 x Linear(in_features=512, out_features=512, bias=True)
+        )
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (feed_forward): PositionwiseFeedForward(
+        (w_1): Linear(in_features=512, out_features=2048, bias=True)
+        (w_2): Linear(in_features=2048, out_features=512, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (sublayer): ModuleList(
+        (0-1): 2 x SublayerConnection(
+          (norm): LayerNorm()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+  )
+  (norm): LayerNorm()
+  (proj): Linear(in_features=512, out_features=1024, bias=True)
+  (fc): Sequential(
+    (0): Flatten(start_dim=1, end_dim=-1)
+    (1): Linear(in_features=512, out_features=1024, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=1024, out_features=1024, bias=True)
+    (4): ReLU()
+    (5): Linear(in_features=1024, out_features=1024, bias=True)
+    (6): ReLU()
+  )
+  (fc_head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:VanillaTransformerEncoder(
+  (spectral_encoding): SpectralEncoding(
+    (encoding): Conv1d(1, 512, kernel_size=(8,), stride=(8,), bias=False)
+    (norm): LayerNorm()
+  )
+  (positional_encoding): LearnablePositionalEncoding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (class_encoding): LearnableClassEmbedding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (layers): ModuleList(
+    (0-5): 6 x EncoderLayer(
+      (self_attn): MultiHeadedAttention(
+        (linears): ModuleList(
+          (0-3): 4 x Linear(in_features=512, out_features=512, bias=True)
+        )
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (feed_forward): PositionwiseFeedForward(
+        (w_1): Linear(in_features=512, out_features=2048, bias=True)
+        (w_2): Linear(in_features=2048, out_features=512, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (sublayer): ModuleList(
+        (0-1): 2 x SublayerConnection(
+          (norm): LayerNorm()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+  )
+  (norm): LayerNorm()
+  (proj): Linear(in_features=512, out_features=1024, bias=True)
+  (fc): Sequential(
+    (0): Flatten(start_dim=1, end_dim=-1)
+    (1): Linear(in_features=512, out_features=1024, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=1024, out_features=1024, bias=True)
+    (4): ReLU()
+    (5): Linear(in_features=1024, out_features=1024, bias=True)
+    (6): ReLU()
+  )
+  (fc_head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:VanillaTransformerEncoder(
+  (spectral_encoding): SpectralEncoding(
+    (encoding): Conv1d(1, 512, kernel_size=(8,), stride=(8,), bias=False)
+    (norm): LayerNorm()
+  )
+  (positional_encoding): LearnablePositionalEncoding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (class_encoding): LearnableClassEmbedding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (layers): ModuleList(
+    (0-5): 6 x EncoderLayer(
+      (self_attn): MultiHeadedAttention(
+        (linears): ModuleList(
+          (0-3): 4 x Linear(in_features=512, out_features=512, bias=True)
+        )
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (feed_forward): PositionwiseFeedForward(
+        (w_1): Linear(in_features=512, out_features=2048, bias=True)
+        (w_2): Linear(in_features=2048, out_features=512, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (sublayer): ModuleList(
+        (0-1): 2 x SublayerConnection(
+          (norm): LayerNorm()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+  )
+  (norm): LayerNorm()
+  (proj): Linear(in_features=512, out_features=1024, bias=True)
+  (fc): Sequential(
+    (0): Flatten(start_dim=1, end_dim=-1)
+    (1): Linear(in_features=512, out_features=1024, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=1024, out_features=1024, bias=True)
+    (4): ReLU()
+    (5): Linear(in_features=1024, out_features=1024, bias=True)
+    (6): ReLU()
+  )
+  (fc_head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:VanillaTransformerEncoder(
+  (spectral_encoding): SpectralEncoding(
+    (encoding): Conv1d(1, 512, kernel_size=(8,), stride=(8,), bias=False)
+    (norm): LayerNorm()
+  )
+  (positional_encoding): LearnablePositionalEncoding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (class_encoding): LearnableClassEmbedding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (layers): ModuleList(
+    (0-5): 6 x EncoderLayer(
+      (self_attn): MultiHeadedAttention(
+        (linears): ModuleList(
+          (0-3): 4 x Linear(in_features=512, out_features=512, bias=True)
+        )
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (feed_forward): PositionwiseFeedForward(
+        (w_1): Linear(in_features=512, out_features=2048, bias=True)
+        (w_2): Linear(in_features=2048, out_features=512, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (sublayer): ModuleList(
+        (0-1): 2 x SublayerConnection(
+          (norm): LayerNorm()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+  )
+  (norm): LayerNorm()
+  (proj): Linear(in_features=512, out_features=1024, bias=True)
+  (fc): Sequential(
+    (0): Flatten(start_dim=1, end_dim=-1)
+    (1): Linear(in_features=512, out_features=1024, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=1024, out_features=1024, bias=True)
+    (4): ReLU()
+    (5): Linear(in_features=1024, out_features=1024, bias=True)
+    (6): ReLU()
+  )
+  (fc_head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:VanillaTransformerEncoder(
+  (spectral_encoding): SpectralEncoding(
+    (encoding): Conv1d(1, 512, kernel_size=(8,), stride=(8,), bias=False)
+    (norm): LayerNorm()
+  )
+  (positional_encoding): LearnablePositionalEncoding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (class_encoding): LearnableClassEmbedding(
+    (dropout): Dropout(p=0.1, inplace=False)
+  )
+  (layers): ModuleList(
+    (0-5): 6 x EncoderLayer(
+      (self_attn): MultiHeadedAttention(
+        (linears): ModuleList(
+          (0-3): 4 x Linear(in_features=512, out_features=512, bias=True)
+        )
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (feed_forward): PositionwiseFeedForward(
+        (w_1): Linear(in_features=512, out_features=2048, bias=True)
+        (w_2): Linear(in_features=2048, out_features=512, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (sublayer): ModuleList(
+        (0-1): 2 x SublayerConnection(
+          (norm): LayerNorm()
+          (dropout): Dropout(p=0.1, inplace=False)
+        )
+      )
+    )
+  )
+  (norm): LayerNorm()
+  (proj): Linear(in_features=512, out_features=1024, bias=True)
+  (fc): Sequential(
+    (0): Flatten(start_dim=1, end_dim=-1)
+    (1): Linear(in_features=512, out_features=1024, bias=True)
+    (2): ReLU()
+    (3): Linear(in_features=1024, out_features=1024, bias=True)
+    (4): ReLU()
+    (5): Linear(in_features=1024, out_features=1024, bias=True)
+    (6): ReLU()
+  )
+  (fc_head): Linear(in_features=1024, out_features=1024, bias=True)
+)

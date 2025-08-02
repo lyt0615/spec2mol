@@ -1,0 +1,459 @@
+INFO:{'net': 'MLPMixer', 'ds': 'ir', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'MLPMixer', 'ds': 'ir', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'MLPMixer', 'ds': 'ir', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:{'net': 'MLPMixer', 'ds': 'ir', 'device': 'cuda:0', 'pretrain': True, 'test_checkpoint': 'checkpoints/ir/MLPMixer/2025-07-25_09_13/421_f1_5592.pth', 'seed': 2024, 'n_mixer': '2', 'depth': '1', 'use_mixer': '1', 'use_se': '1', 'use_res': True, 'epoch': '200', 'lr': '1e-4'}
+INFO:ResNet(
+  (spec_emb): Sequential(
+    (0): Conv1d(1, 256, kernel_size=(16,), stride=(16,))
+    (1): BatchNorm1d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): GELU(approximate='none')
+    (3): Dropout(p=0.2, inplace=False)
+  )
+  (encoder): Sequential(
+    (0): Sequential(
+      (0): ResidualBlock(
+        (conv1): Conv1d(256, 1024, kernel_size=(5,), stride=(1,), padding=(2,), bias=False)
+        (bn1): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv1d(1024, 1024, kernel_size=(5,), stride=(1,), padding=(2,), bias=False)
+        (bn2): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (se): SE_block(
+          (fc1): Conv(
+            (conv): Conv1d(1024, 256, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (act): LeakyReLU(negative_slope=0.01)
+          )
+          (fc2): Conv(
+            (conv): Conv1d(256, 1024, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (act): LeakyReLU(negative_slope=0.01)
+          )
+          (sigmoid): Sigmoid()
+        )
+        (shortcut): Sequential(
+          (0): Conv1d(256, 1024, kernel_size=(1,), stride=(1,), bias=False)
+          (1): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        )
+      )
+    )
+  )
+  (mlpmixer): MLPMixer1D(
+    (channel_linear): Conv1d(1024, 1024, kernel_size=(1,), stride=(1,))
+    (token_mixers): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Linear(in_features=1024, out_features=768, bias=True)
+        (1): GELU(approximate='none')
+        (2): Dropout(p=0.0, inplace=False)
+        (3): Linear(in_features=768, out_features=1024, bias=True)
+        (4): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (channel_mixers): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Linear(in_features=16, out_features=768, bias=True)
+        (1): GELU(approximate='none')
+        (2): Dropout(p=0.0, inplace=False)
+        (3): Linear(in_features=768, out_features=16, bias=True)
+        (4): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (token_norm): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+    (channel_norm): LayerNorm((16,), eps=1e-05, elementwise_affine=True)
+  )
+  (head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:ResNet(
+  (spec_emb): Sequential(
+    (0): Conv1d(1, 256, kernel_size=(16,), stride=(16,))
+    (1): BatchNorm1d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): GELU(approximate='none')
+    (3): Dropout(p=0.2, inplace=False)
+  )
+  (encoder): Sequential(
+    (0): Sequential(
+      (0): ResidualBlock(
+        (conv1): Conv1d(256, 1024, kernel_size=(5,), stride=(1,), padding=(2,), bias=False)
+        (bn1): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv1d(1024, 1024, kernel_size=(5,), stride=(1,), padding=(2,), bias=False)
+        (bn2): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (se): SE_block(
+          (fc1): Conv(
+            (conv): Conv1d(1024, 256, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (act): LeakyReLU(negative_slope=0.01)
+          )
+          (fc2): Conv(
+            (conv): Conv1d(256, 1024, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (act): LeakyReLU(negative_slope=0.01)
+          )
+          (sigmoid): Sigmoid()
+        )
+        (shortcut): Sequential(
+          (0): Conv1d(256, 1024, kernel_size=(1,), stride=(1,), bias=False)
+          (1): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        )
+      )
+    )
+  )
+  (mlpmixer): MLPMixer1D(
+    (channel_linear): Conv1d(1024, 1024, kernel_size=(1,), stride=(1,))
+    (token_mixers): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Linear(in_features=1024, out_features=768, bias=True)
+        (1): GELU(approximate='none')
+        (2): Dropout(p=0.0, inplace=False)
+        (3): Linear(in_features=768, out_features=1024, bias=True)
+        (4): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (channel_mixers): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Linear(in_features=16, out_features=768, bias=True)
+        (1): GELU(approximate='none')
+        (2): Dropout(p=0.0, inplace=False)
+        (3): Linear(in_features=768, out_features=16, bias=True)
+        (4): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (token_norm): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+    (channel_norm): LayerNorm((16,), eps=1e-05, elementwise_affine=True)
+  )
+  (head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:ResNet(
+  (spec_emb): Sequential(
+    (0): Conv1d(1, 256, kernel_size=(16,), stride=(16,))
+    (1): BatchNorm1d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): GELU(approximate='none')
+    (3): Dropout(p=0.2, inplace=False)
+  )
+  (encoder): Sequential(
+    (0): Sequential(
+      (0): ResidualBlock(
+        (conv1): Conv1d(256, 1024, kernel_size=(5,), stride=(1,), padding=(2,), bias=False)
+        (bn1): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv1d(1024, 1024, kernel_size=(5,), stride=(1,), padding=(2,), bias=False)
+        (bn2): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (se): SE_block(
+          (fc1): Conv(
+            (conv): Conv1d(1024, 256, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (act): LeakyReLU(negative_slope=0.01)
+          )
+          (fc2): Conv(
+            (conv): Conv1d(256, 1024, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (act): LeakyReLU(negative_slope=0.01)
+          )
+          (sigmoid): Sigmoid()
+        )
+        (shortcut): Sequential(
+          (0): Conv1d(256, 1024, kernel_size=(1,), stride=(1,), bias=False)
+          (1): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        )
+      )
+    )
+  )
+  (mlpmixer): MLPMixer1D(
+    (channel_linear): Conv1d(1024, 1024, kernel_size=(1,), stride=(1,))
+    (token_mixers): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Linear(in_features=1024, out_features=768, bias=True)
+        (1): GELU(approximate='none')
+        (2): Dropout(p=0.0, inplace=False)
+        (3): Linear(in_features=768, out_features=1024, bias=True)
+        (4): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (channel_mixers): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Linear(in_features=16, out_features=768, bias=True)
+        (1): GELU(approximate='none')
+        (2): Dropout(p=0.0, inplace=False)
+        (3): Linear(in_features=768, out_features=16, bias=True)
+        (4): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (token_norm): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+    (channel_norm): LayerNorm((16,), eps=1e-05, elementwise_affine=True)
+  )
+  (head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:ResNet(
+  (spec_emb): Sequential(
+    (0): Conv1d(1, 256, kernel_size=(16,), stride=(16,))
+    (1): BatchNorm1d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+    (2): GELU(approximate='none')
+    (3): Dropout(p=0.2, inplace=False)
+  )
+  (encoder): Sequential(
+    (0): Sequential(
+      (0): ResidualBlock(
+        (conv1): Conv1d(256, 1024, kernel_size=(5,), stride=(1,), padding=(2,), bias=False)
+        (bn1): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (conv2): Conv1d(1024, 1024, kernel_size=(5,), stride=(1,), padding=(2,), bias=False)
+        (bn2): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        (se): SE_block(
+          (fc1): Conv(
+            (conv): Conv1d(1024, 256, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(256, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (act): LeakyReLU(negative_slope=0.01)
+          )
+          (fc2): Conv(
+            (conv): Conv1d(256, 1024, kernel_size=(1,), stride=(1,), bias=False)
+            (bn): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+            (act): LeakyReLU(negative_slope=0.01)
+          )
+          (sigmoid): Sigmoid()
+        )
+        (shortcut): Sequential(
+          (0): Conv1d(256, 1024, kernel_size=(1,), stride=(1,), bias=False)
+          (1): BatchNorm1d(1024, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
+        )
+      )
+    )
+  )
+  (mlpmixer): MLPMixer1D(
+    (channel_linear): Conv1d(1024, 1024, kernel_size=(1,), stride=(1,))
+    (token_mixers): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Linear(in_features=1024, out_features=768, bias=True)
+        (1): GELU(approximate='none')
+        (2): Dropout(p=0.0, inplace=False)
+        (3): Linear(in_features=768, out_features=1024, bias=True)
+        (4): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (channel_mixers): ModuleList(
+      (0-1): 2 x Sequential(
+        (0): Linear(in_features=16, out_features=768, bias=True)
+        (1): GELU(approximate='none')
+        (2): Dropout(p=0.0, inplace=False)
+        (3): Linear(in_features=768, out_features=16, bias=True)
+        (4): Dropout(p=0.0, inplace=False)
+      )
+    )
+    (token_norm): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+    (channel_norm): LayerNorm((16,), eps=1e-05, elementwise_affine=True)
+  )
+  (head): Linear(in_features=1024, out_features=1024, bias=True)
+)
+INFO:Epoch  0, train loss:0.018796
+INFO:Epoch  0, train loss:0.018696
+INFO:Epoch  0, train loss:0.018790
+INFO:Epoch  0, train loss:0.018759
+INFO:Epoch  0, valid loss:0.008873, valid accuracy:0.000000
+INFO:Epoch  0, valid loss:0.008651, valid accuracy:0.000000
+INFO:Epoch  0, valid loss:0.008772, valid accuracy:0.000000
+INFO:Epoch  0, valid loss:0.008823, valid accuracy:0.000000
+INFO:Epoch  1, train loss:0.005448
+INFO:Epoch  1, train loss:0.005406
+INFO:Epoch  1, train loss:0.005454
+INFO:Epoch  1, train loss:0.005507
+INFO:Epoch  1, valid loss:0.003189, valid accuracy:0.000000
+INFO:Epoch  1, valid loss:0.003104, valid accuracy:0.000000
+INFO:Epoch  1, valid loss:0.003270, valid accuracy:0.000000
+INFO:Epoch  1, valid loss:0.003163, valid accuracy:0.000000
+INFO:Epoch  2, train loss:0.002810
+INFO:Epoch  2, train loss:0.002765
+INFO:Epoch  2, train loss:0.002784
+INFO:Epoch  2, train loss:0.002764
+INFO:Epoch  2, valid loss:0.002107, valid accuracy:0.000000
+INFO:Epoch  2, valid loss:0.002012, valid accuracy:0.000000
+INFO:Epoch  2, valid loss:0.002091, valid accuracy:0.000000
+INFO:Epoch  2, valid loss:0.002069, valid accuracy:0.000000
+INFO:Epoch  3, train loss:0.001966
+INFO:Epoch  3, train loss:0.001969
+INFO:Epoch  3, train loss:0.001963
+INFO:Epoch  3, train loss:0.001937
+INFO:Epoch  3, valid loss:0.001444, valid accuracy:0.000000
+INFO:Epoch  3, valid loss:0.001516, valid accuracy:0.000000
+INFO:Epoch  3, valid loss:0.001474, valid accuracy:0.000000
+INFO:Epoch  3, valid loss:0.001485, valid accuracy:0.000000
+INFO:Epoch  4, train loss:0.001560
+INFO:Epoch  4, train loss:0.001560
+INFO:Epoch  4, train loss:0.001557
+INFO:Epoch  4, train loss:0.001583
+INFO:Epoch  4, valid loss:0.001195, valid accuracy:0.000000
+INFO:Epoch  4, valid loss:0.001133, valid accuracy:0.000000
+INFO:Epoch  4, valid loss:0.001159, valid accuracy:0.000000
+INFO:Epoch  4, valid loss:0.001161, valid accuracy:0.000000
+INFO:Epoch  5, train loss:0.001336
+INFO:Epoch  5, train loss:0.001323
+INFO:Epoch  5, train loss:0.001326
+INFO:Epoch  5, train loss:0.001340
+INFO:Epoch  5, valid loss:0.000986, valid accuracy:0.000000
+INFO:Epoch  5, valid loss:0.001037, valid accuracy:0.000000
+INFO:Epoch  5, valid loss:0.001002, valid accuracy:0.000000
+INFO:Epoch  5, valid loss:0.001009, valid accuracy:0.000000
+INFO:Epoch  6, train loss:0.001182
+INFO:Epoch  6, train loss:0.001196
+INFO:Epoch  6, train loss:0.001199
+INFO:Epoch  6, train loss:0.001194
+INFO:Epoch  6, valid loss:0.000905, valid accuracy:0.000000
+INFO:Epoch  6, valid loss:0.000878, valid accuracy:0.000000
+INFO:Epoch  6, valid loss:0.000886, valid accuracy:0.000000
+INFO:Epoch  6, valid loss:0.000888, valid accuracy:0.000000
+INFO:Epoch  7, train loss:0.001077
+INFO:Epoch  7, train loss:0.001081
+INFO:Epoch  7, train loss:0.001081
+INFO:Epoch  7, train loss:0.001088
+INFO:Epoch  7, valid loss:0.000799, valid accuracy:0.000000
+INFO:Epoch  7, valid loss:0.000809, valid accuracy:0.000000
+INFO:Epoch  7, valid loss:0.000837, valid accuracy:0.000000
+INFO:Epoch  7, valid loss:0.000821, valid accuracy:0.000000
+INFO:Epoch  8, train loss:0.001000
+INFO:Epoch  8, train loss:0.001005
+INFO:Epoch  8, train loss:0.001005
+INFO:Epoch  8, train loss:0.001008
+INFO:Epoch  8, valid loss:0.000740, valid accuracy:0.000000
+INFO:Epoch  8, valid loss:0.000758, valid accuracy:0.000000
+INFO:Epoch  8, valid loss:0.000737, valid accuracy:0.000000
+INFO:Epoch  8, valid loss:0.000742, valid accuracy:0.000000
+INFO:Epoch  9, train loss:0.000940
+INFO:Epoch  9, train loss:0.000935
+INFO:Epoch  9, train loss:0.000935
+INFO:Epoch  9, train loss:0.000939
+INFO:Epoch  9, valid loss:0.000703, valid accuracy:0.000000
+INFO:Epoch  9, valid loss:0.000741, valid accuracy:0.000000
+INFO:Epoch  9, valid loss:0.000708, valid accuracy:0.000000
+INFO:Epoch  9, valid loss:0.000711, valid accuracy:0.000000
+INFO:Epoch 10, train loss:0.000895
+INFO:Epoch 10, train loss:0.000896
+INFO:Epoch 10, train loss:0.000896
+INFO:Epoch 10, train loss:0.000893
+INFO:Epoch 10, valid loss:0.000666, valid accuracy:0.000000
+INFO:Epoch 10, valid loss:0.000684, valid accuracy:0.000000
+INFO:Epoch 10, valid loss:0.000660, valid accuracy:0.000000
+INFO:Epoch 10, valid loss:0.000665, valid accuracy:0.000000
+INFO:Epoch 11, train loss:0.000858
+INFO:Epoch 11, train loss:0.000854
+INFO:Epoch 11, train loss:0.000862
+INFO:Epoch 11, train loss:0.000855
+INFO:Epoch 11, valid loss:0.000646, valid accuracy:0.000000
+INFO:Epoch 11, valid loss:0.000625, valid accuracy:0.000000
+INFO:Epoch 11, valid loss:0.000630, valid accuracy:0.000000
+INFO:Epoch 11, valid loss:0.000638, valid accuracy:0.000000
+INFO:Epoch 12, train loss:0.000811
+INFO:Epoch 12, train loss:0.000818
+INFO:Epoch 12, train loss:0.000823
+INFO:Epoch 12, train loss:0.000814
+INFO:Epoch 12, valid loss:0.000603, valid accuracy:0.000000
+INFO:Epoch 12, valid loss:0.000625, valid accuracy:0.000000
+INFO:Epoch 12, valid loss:0.000610, valid accuracy:0.000000
+INFO:Epoch 12, valid loss:0.000613, valid accuracy:0.000000
+INFO:Epoch 13, train loss:0.000787
+INFO:Epoch 13, train loss:0.000788
+INFO:Epoch 13, train loss:0.000790
+INFO:Epoch 13, train loss:0.000795
+INFO:Epoch 13, valid loss:0.000601, valid accuracy:0.000000
+INFO:Epoch 13, valid loss:0.000581, valid accuracy:0.000000
+INFO:Epoch 13, valid loss:0.000580, valid accuracy:0.000000
+INFO:Epoch 13, valid loss:0.000585, valid accuracy:0.000000
+INFO:Epoch 14, train loss:0.000761
+INFO:Epoch 14, train loss:0.000770
+INFO:Epoch 14, train loss:0.000763
+INFO:Epoch 14, train loss:0.000763
+INFO:Epoch 14, valid loss:0.000590, valid accuracy:0.000000
+INFO:Epoch 14, valid loss:0.000564, valid accuracy:0.000000
+INFO:Epoch 14, valid loss:0.000567, valid accuracy:0.000000
+INFO:Epoch 14, valid loss:0.000562, valid accuracy:0.000000
+INFO:Epoch 15, train loss:0.000741
+INFO:Epoch 15, train loss:0.000739
+INFO:Epoch 15, train loss:0.000741
+INFO:Epoch 15, train loss:0.000738
+INFO:Epoch 15, valid loss:0.000550, valid accuracy:0.000000
+INFO:Epoch 15, valid loss:0.000569, valid accuracy:0.000000
+INFO:Epoch 15, valid loss:0.000549, valid accuracy:0.000000
+INFO:Epoch 15, valid loss:0.000551, valid accuracy:0.000000
+INFO:Epoch 16, train loss:0.000718
+INFO:Epoch 16, train loss:0.000714
+INFO:Epoch 16, train loss:0.000725
+INFO:Epoch 16, train loss:0.000727
+INFO:Epoch 16, valid loss:0.000541, valid accuracy:0.000000
+INFO:Epoch 16, valid loss:0.000554, valid accuracy:0.000000
+INFO:Epoch 16, valid loss:0.000546, valid accuracy:0.000000
+INFO:Epoch 16, valid loss:0.000540, valid accuracy:0.000000
+INFO:Epoch 17, train loss:0.000703
+INFO:Epoch 17, train loss:0.000709
+INFO:Epoch 17, train loss:0.000706
+INFO:Epoch 17, train loss:0.000706
+INFO:Epoch 17, valid loss:0.000532, valid accuracy:0.000000
+INFO:Epoch 17, valid loss:0.000522, valid accuracy:0.000000
+INFO:Epoch 17, valid loss:0.000522, valid accuracy:0.000000
+INFO:Epoch 17, valid loss:0.000521, valid accuracy:0.000000
+INFO:Epoch 18, train loss:0.000691
+INFO:Epoch 18, train loss:0.000686
+INFO:Epoch 18, train loss:0.000696
+INFO:Epoch 18, train loss:0.000691
+INFO:Epoch 18, valid loss:0.000517, valid accuracy:0.000000
+INFO:Epoch 18, valid loss:0.000513, valid accuracy:0.000000
+INFO:Epoch 18, valid loss:0.000530, valid accuracy:0.000000
+INFO:Epoch 18, valid loss:0.000510, valid accuracy:0.000000
+INFO:Epoch 19, train loss:0.000674
+INFO:Epoch 19, train loss:0.000678
+INFO:Epoch 19, train loss:0.000674
+INFO:Epoch 19, train loss:0.000678
+INFO:Epoch 19, valid loss:0.000496, valid accuracy:0.000000
+INFO:Epoch 19, valid loss:0.000511, valid accuracy:0.000000
+INFO:Epoch 19, valid loss:0.000500, valid accuracy:0.000000
+INFO:Epoch 19, valid loss:0.000499, valid accuracy:0.000000
+INFO:Epoch 20, train loss:0.000659
+INFO:Epoch 20, train loss:0.000660
+INFO:Epoch 20, train loss:0.000662
+INFO:Epoch 20, train loss:0.000663
+INFO:Epoch 20, valid loss:0.000513, valid accuracy:0.000000
+INFO:Epoch 20, valid loss:0.000503, valid accuracy:0.000000
+INFO:Epoch 20, valid loss:0.000506, valid accuracy:0.000000
+INFO:Epoch 20, valid loss:0.000502, valid accuracy:0.000000
+INFO:Epoch 21, train loss:0.000647
+INFO:Epoch 21, train loss:0.000653
+INFO:Epoch 21, train loss:0.000655
+INFO:Epoch 21, train loss:0.000650
+INFO:Epoch 21, valid loss:0.000488, valid accuracy:0.000000
+INFO:Epoch 21, valid loss:0.000485, valid accuracy:0.000000
+INFO:Epoch 21, valid loss:0.000475, valid accuracy:0.000000
+INFO:Epoch 21, valid loss:0.000473, valid accuracy:0.000000
+INFO:Epoch 22, train loss:0.000636
+INFO:Epoch 22, train loss:0.000640
+INFO:Epoch 22, train loss:0.000637
+INFO:Epoch 22, train loss:0.000645
+INFO:Epoch 22, valid loss:0.000485, valid accuracy:0.000000
+INFO:Epoch 22, valid loss:0.000486, valid accuracy:0.000000
+INFO:Epoch 22, valid loss:0.000478, valid accuracy:0.000000
+INFO:Epoch 22, valid loss:0.000476, valid accuracy:0.000000
+INFO:Epoch 23, train loss:0.000629
+INFO:Epoch 23, train loss:0.000635
+INFO:Epoch 23, train loss:0.000629
+INFO:Epoch 23, train loss:0.000632
+INFO:Epoch 23, valid loss:0.000482, valid accuracy:0.000000
+INFO:Epoch 23, valid loss:0.000474, valid accuracy:0.000000
+INFO:Epoch 23, valid loss:0.000470, valid accuracy:0.000000
+INFO:Epoch 23, valid loss:0.000476, valid accuracy:0.000000
+INFO:Epoch 24, train loss:0.000615
+INFO:Epoch 24, train loss:0.000619
+INFO:Epoch 24, train loss:0.000618
+INFO:Epoch 24, train loss:0.000624
+INFO:Epoch 24, valid loss:0.000471, valid accuracy:0.000000
+INFO:Epoch 24, valid loss:0.000455, valid accuracy:0.000000
+INFO:Epoch 24, valid loss:0.000457, valid accuracy:0.000000
+INFO:Epoch 24, valid loss:0.000458, valid accuracy:0.000000
+INFO:Epoch 25, train loss:0.000612
+INFO:Epoch 25, train loss:0.000608
+INFO:Epoch 25, train loss:0.000612
+INFO:Epoch 25, train loss:0.000613
+INFO:Epoch 25, valid loss:0.000459, valid accuracy:0.000000
+INFO:Epoch 25, valid loss:0.000458, valid accuracy:0.000000
+INFO:Epoch 25, valid loss:0.000463, valid accuracy:0.000000
+INFO:Epoch 25, valid loss:0.000455, valid accuracy:0.000000
+INFO:Epoch 26, train loss:0.000602
+INFO:Epoch 26, train loss:0.000606
+INFO:Epoch 26, train loss:0.000604
+INFO:Epoch 26, train loss:0.000607
+INFO:Epoch 26, valid loss:0.000465, valid accuracy:0.000000
+INFO:Epoch 26, valid loss:0.000455, valid accuracy:0.000000
+INFO:Epoch 26, valid loss:0.000445, valid accuracy:0.000000
+INFO:Epoch 26, valid loss:0.000448, valid accuracy:0.000000
+INFO:Epoch 27, train loss:0.000594
+INFO:Epoch 27, train loss:0.000597
+INFO:Epoch 27, train loss:0.000595
