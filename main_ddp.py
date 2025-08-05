@@ -40,12 +40,10 @@ def get_args_parser():
     parser.add_argument('--seed',
                         default=2024,
                         help="Random seed")
-
+    parser.add_argument('--max_len',
+                        default=1000,
+                        help="Maxial length of output sequence when decoding")
     # params of CNN_exp & CNN_SE & MLPMixer
-    parser.add_argument('--n_conv', 
-                        help="Number of convolution layers in CNN_exp")
-    parser.add_argument('--n_fc', 
-                        help="Number of fc layers in CNN_exp")
     parser.add_argument('--n_mixer', 
                         help="Number of MLPMixer1D")  
     parser.add_argument('--depth', 
@@ -54,8 +52,6 @@ def get_args_parser():
                         help="Use MLPMixer1D or not")      
     parser.add_argument('--use_se', default=True,
                         help="Use SE or not")  
-    parser.add_argument('--use_res', default=True,
-                        help="Use Residual connection or not")  
     
     # params of strategy
     parser.add_argument('--train_size',
@@ -119,11 +115,6 @@ def main(rank=None, world_size=None, save_every=None):
     #     params['net']['use_se'] = eval(args.use_se) if type(args.use_se) == str else args.use_se
     #     params['net']['use_res'] = eval(args.use_res) if type(args.use_res) == str else args.use_res
     # params['use_pi']['use_pi'] = args.use_pi
-
-    if args.n_conv:
-        params['net']['conv_num_layers'] = int(args.n_conv)
-    if args.n_fc:
-        params['net']['fc_num_layers'] = int(args.n_fc)
     if args.n_mixer:
         params['net']['mixer_num_layers'] = int(args.n_mixer)
     if args.depth:
@@ -138,24 +129,6 @@ def main(rank=None, world_size=None, save_every=None):
         params['strategy']['Adam_params']["lr"] = float(args.lr)
     if args.train_size:
         params['strategy']['train_size'] = float(args.train_size)
-
-    if args.net == 'CNN_exp':
-        n_conv = params['net']['conv_num_layers']
-        if args.use_mixer:
-            n_mixer = params['net']['mixer_num_layers']
-            ts = time.strftime('%Y-%m-%d_%H_%M', time.localtime()) #+ f'_conv{n_conv}mixer{n_mixer}'
-        else:
-            n_fc = params['net']['fc_num_layers']
-            ts = time.strftime('%Y-%m-%d_%H_%M', time.localtime()) #+ f'_conv{n_conv}fc{n_fc}'
-
-    if args.net == 'CNN_SE':
-        depth = params['net']['depth']
-        n_mixer = params['net']['mixer_num_layers']
-        n_fc = params['net']['fc_num_layers']
-        if args.use_mixer:
-            ts = time.strftime('%Y-%m-%d_%H_%M', time.localtime()) #+ f'mixer{n_mixer}_layer{depth}'
-        else:
-            ts = time.strftime('%Y-%m-%d_%H_%M', time.localtime()) #+ f'fc{n_fc}_layer{depth}'  
 
     if args.net == 'MLPMixer' or args.net == 'Res_SE':
         params['net']['use_se'] = eval(args.use_se) if type(args.use_se) == str else args.use_se
@@ -210,12 +183,10 @@ def main(rank=None, world_size=None, save_every=None):
     elif FileExistsError: pass
 
     if args.ds == 'ir_pretrain':
-        n_classes = 1024
-    elif 'qm9s' in args.ds:
-        n_classes = 957
+        tgt_vocab = 1024
     else:
-        n_classes = len(json.load(open(os.path.join(data_root, 'label.json'))))
-    params['net']['n_classes'] = n_classes
+        tgt_vocab = 20
+    params['net']['tgt_vocab'] = tgt_vocab
 
 
     if net_ == 'MLPMixer':
@@ -224,7 +195,9 @@ def main(rank=None, world_size=None, save_every=None):
 
     elif net_ == 'Transformer':
         from models.Transformer import make_model
-        net = make_model(1024, 19)
+        net, src_length = make_model(1024, tgt_vocab)
+        params['strategy']['src_length'] = src_length
+        params['strategy']['max_len'] = args.max_len
 
     logging.info(net)
 

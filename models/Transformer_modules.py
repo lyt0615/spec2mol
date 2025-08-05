@@ -305,8 +305,8 @@ def make_model(src_vocab, tgt_vocab, N=6,
 tmp_model = make_model(src_vocab=10, tgt_vocab=10, N=2)
 
 class Collator:
-    def __init__(self, x, y, src_length):
-        self.src, self.tgt, self.src_mask, self.tgt_mask, self.tgt_y, self.ntokens = self.collate([x, y], src_length)
+    def __init__(self, batch, src_length):
+        self.src, self.tgt, self.src_mask, self.tgt_mask, self.tgt_y, self.ntokens = self.collate(batch, src_length)
 
     def make_pad_mask(self, lengths: torch.Tensor, max_len: int = None):
         """
@@ -329,15 +329,15 @@ class Collator:
             src = torch.nn.utils.rnn.pad_sequence(src_length, batch_first=True, padding_value=padding_value)
             src_lengths = torch.tensor([k.shape[-1] for k in batch[0]])
             src_mask = self.make_pad_mask(src_lengths, src.size(-1))   # [B,1,1,Ls]
-        tgt = [t[:-1] for t in batch[1]]
-        tgt_y = [t1[1:] for t1 in batch[1]]
+        tgt = batch[1][:-1]
+        tgt_y = batch[1][1:]
         ntokens = sum([(y!=padding_value).sum() for y in tgt_y])
-        tgt = torch.nn.utils.rnn.pad_sequence(tgt, batch_first=True, padding_value=padding_value)
-        tgt_y = torch.nn.utils.rnn.pad_sequence(tgt_y, batch_first=True, padding_value=padding_value)
+        # tgt = torch.nn.utils.rnn.pad_sequence(tgt, batch_first=True, padding_value=padding_value)
+        # tgt_y = torch.nn.utils.rnn.pad_sequence(tgt_y, batch_first=True, padding_value=padding_value)
         tgt_lengths = torch.tensor([j.shape[-1] for j in batch[1]])
         tgt_pad_mask = self.make_pad_mask(tgt_lengths, tgt.size(-1))  # [B,1,1,Lt]
         causal_mask = self.make_causal_mask(tgt.size(1), tgt.device)  # [Lt,Lt]
-        tgt_mask = tgt_pad_mask | causal_mask #.unsqueeze(0).unsqueeze(0)
+        tgt_mask = tgt_pad_mask | causal_mask #tgt_pad_mask  .unsqueeze(0).unsqueeze(0)
         return src, tgt, src_mask, tgt_mask, tgt_y, ntokens
     
 class Batch:
@@ -362,23 +362,23 @@ class Batch:
 
 def run_epoch(data_iter, model, loss_compute):
     "Standard Training and Logging Function"
-    start = time.time()
+    # start = time.time()
     total_tokens = 0
     total_loss = 0
     tokens = 0
-    for i, batch in enumerate(data_iter):
-        out = model.forward(batch.src, batch.tgt,
-                            batch.src_mask, batch.tgt_mask)
-        loss = loss_compute(out, batch.tgt_y, batch.ntokens)
-        total_loss += loss
-        total_tokens += batch.ntokens
-        tokens += batch.ntokens
-        if i % 50 == 1:
-            elapsed = time.time() - start
-            print("Epoch Step: %d Loss: %f Tokens per Sec: %f" %
-                  (i, loss / batch.ntokens, tokens / elapsed))
-            start = time.time()
-            tokens = 0
+    # for i, batch in enumerate(data_iter):
+    out = model.forward(data_iter.src, data_iter.tgt,
+                        data_iter.src_mask, data_iter.tgt_mask)
+    loss = loss_compute(out, data_iter.tgt_y, data_iter.ntokens)
+    total_loss += loss
+    total_tokens += data_iter.ntokens
+    tokens += data_iter.ntokens
+    # if i % 50 == 1:
+    #     elapsed = time.time() - start
+    #     print("Epoch Step: %d Loss: %f Tokens per Sec: %f" %
+    #             (i, loss / data_iter.ntokens, tokens / elapsed))
+    #     start = time.time()
+    #     tokens = 0
     return total_loss / total_tokens
 
 
@@ -435,9 +435,9 @@ def get_std_opt(model):
 class LabelSmoothing(nn.Module):
     "Implement label smoothing."
 
-    def __init__(self, size, padding_idx, smoothing=0.0):
+    def __init__(self, size, padding_idx, criterion, smoothing=0.0):
         super(LabelSmoothing, self).__init__()
-        self.criterion = nn.KLDivLoss(reduction='sum')
+        self.criterion = criterion  #nn.KLDivLoss(reduction='sum')
         self.padding_idx = padding_idx
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
@@ -486,10 +486,10 @@ class SimpleLossCompute:
         return loss.data.item() * norm
 
 
-def greedy_decode(model, src, src_mask, max_len, start_symbol):
+def greedy_decode(model, src, src_mask, max_len, start_symbol=0):
     memory = model.encode(src, src_mask)
     ys = torch.ones(1, 1, dtype=torch.long).fill_(start_symbol)
-    for i in range(max_len-1):
+    for _ in range(max_len-1):
         out = model.decode(memory, src_mask,
                            Variable(ys),
                            Variable(subsequent_mask(ys.size(1))
@@ -498,6 +498,8 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
         _, next_word = torch.max(prob, dim=1)
         next_word = next_word.data[0]
         ys = torch.cat([ys, torch.ones(1, 1, dtype=torch.long).fill_(next_word)], dim=1)
+        if next_word.data == max_len+1:
+            break
     return ys
 
 

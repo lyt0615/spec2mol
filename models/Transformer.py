@@ -1,7 +1,7 @@
 import sys
 sys.path.append('/data/YantiLiu/projects/substructure-ID/datasets')
 
-from Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, LearnablePositionalEncoding, NoamOpt, run_epoch, Variable, SimpleLossCompute, greedy_decode, LabelSmoothing, Collator
+from models.Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, LearnablePositionalEncoding, NoamOpt, run_epoch, Variable, SimpleLossCompute, greedy_decode, LabelSmoothing, Collator
 import torch
 import torch.nn as nn
 import numpy as np
@@ -100,7 +100,7 @@ class FPGrowingModule(nn.Module):
 def make_model(src_vocab, tgt_vocab, N=6,
                d_model=512, d_ff=2048, h=8, dropout=0.1):
     import copy
-    from modules import PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
+    from models.Transformer_modules import PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
     "Helper: Construct a model from hyperparameters."
     spec_encoding = SpectralEncoding(d_model, 8, LayerNorm)
     src_length = spec_encoding(torch.randn([1,1,src_vocab])).shape[-2]
@@ -137,7 +137,7 @@ if __name__ == "__main__":
             'fc_dim':1024, 
             'fc_num_layers':0, 
             'mixer_num_layers':4,
-            'n_classes':957,
+            'tgt_vocab':957,
             'use_mixer':True,
             }
     x = torch.rand(3, 1, 1024)
@@ -163,4 +163,4 @@ if __name__ == "__main__":
     model.eval()
     src = torch.randn(1,1,1024)
     src_mask = Variable(torch.ones(1, 1, src_length))
-    print(greedy_decode(model, src, src_mask, max_len=10, start_symbol=1))
+    print(greedy_decode(model, src, src_mask, max_len=10, start_symbol=0))
