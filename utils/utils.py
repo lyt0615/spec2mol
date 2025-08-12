@@ -250,9 +250,9 @@ def train_model(model, save_path, ds, device='cpu', tune=False,  **kwargs):
     train_loader, val_loader = make_trainloader(
         ds, batch_size=kwargs['batch_size'],
         num_workers=1, train_size=kwargs['train_size'],
-        seed=42, tune=tune, pool_dim=pool_dim)
+        seed=42, tune=tune, )
 
-    test_loader = make_testloader(ds, pool_dim=pool_dim)
+    test_loader = make_testloader(ds, )
     binary = True if 'ir' in ds or 'raman' in ds else False
     if binary:
         if kwargs['use_pi']:
@@ -302,7 +302,7 @@ def train_model(model, save_path, ds, device='cpu', tune=False,  **kwargs):
 
 def test_model(model, ds, device='cpu', verbose=True):
     pool_dim = 256 if model.__class__.__name__ == 'Pace' else 1024
-    test_loader = make_testloader(ds, pool_dim=pool_dim)
+    test_loader = make_testloader(ds, )
     binary = True if 'ir' in ds or 'raman' in ds else False
     criterion = torch.nn.BCELoss() if binary else torch.nn.CrossEntropyLoss()
     engine = Engine(test_loader=test_loader,

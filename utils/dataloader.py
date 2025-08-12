@@ -12,7 +12,7 @@ train_transform = transforms.Compose([ToFloatTensor()])
 valid_transform = transforms.Compose([ToFloatTensor()])
 
 
-class myDataset(Dataset):
+class MyDataset(Dataset):
     """create dataset"""
 
     def __init__(self, X, y, transform=None, pool_dim=None):
@@ -43,8 +43,8 @@ def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, 
 
     else:
         data = pd.read_pickle(f'datasets/{ds}/train.pkl')
-        data_x = data['spectrum'].values
-        data_y = data['label'].values
+        data_x = data['spectrum'].values[:1000]
+        data_y = data['label'].values[:1000]
 
     ids = np.arange(len(data_y))
 
@@ -60,24 +60,24 @@ def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, 
         train_y = data_train['label'].values
         val_x = data_val['spectrum'].values
         val_y = data_val['label'].values
-        trainset = myDataset(train_x, train_y, transform=transform_train, pool_dim=pool_dim)
-        valset = myDataset(val_x, val_y, transform=transform_valid, pool_dim=pool_dim)
+        trainset = MyDataset(train_x, train_y, transform=transform_train, )
+        valset = MyDataset(val_x, val_y, transform=transform_valid, )
 
     elif train_size:
         datat = pd.read_pickle(f'datasets/{ds}/train.pkl')
         data_x = datat['spectrum'].values
         data_y = datat['label'].values
         train_id, val_id = tts(ids, shuffle=False, train_size=train_size, random_state=seed, stratify=stratify)
-        trainset = myDataset(data_x[train_id], data_y[train_id], transform=transform_train, pool_dim=pool_dim)
-        valset = myDataset(data_x[val_id], data_y[val_id], transform=transform_valid, pool_dim=pool_dim)
+        trainset = MyDataset(data_x[train_id], data_y[train_id], transform=transform_train, )
+        valset = MyDataset(data_x[val_id], data_y[val_id], transform=transform_valid, )
 
     else:
         test_data = pd.read_pickle(f'datasets/{ds}/test.pkl')
         test_x = test_data['spectrum'].values
         test_y = test_data['label'].values
 
-        trainset = myDataset(data_x, data_y, transform=transform_train, pool_dim=pool_dim)
-        valset = myDataset(test_x, test_y, transform=transform_valid, pool_dim=pool_dim)
+        trainset = MyDataset(data_x, data_y, transform=transform_train, )
+        valset = MyDataset(test_x, test_y, transform=transform_valid, )
 
     trainloader = DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
     valloader = DataLoader(valset, batch_size=batch_size, num_workers=num_workers, shuffle=False, pin_memory=True)
@@ -92,6 +92,6 @@ def make_testloader(ds, batch_size=128, num_workers=1, pool_dim=256):
 
     transform_valid = bacteria_valid_transform if ds == 'Bacteria' else valid_transform
 
-    testset = myDataset(data_x, data_y, transform=transform_valid, pool_dim=pool_dim)
+    testset = MyDataset(data_x, data_y, transform=transform_valid, )
     return DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 

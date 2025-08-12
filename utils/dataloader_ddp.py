@@ -8,33 +8,65 @@ from torch.utils.data.distributed import DistributedSampler
 from sklearn.model_selection import train_test_split as tts
 from torchvision import transforms
 import torch.nn.functional as F
+from functools import lru_cache
 
-train_transform = transforms.Compose([ToFloatTensor()])
-valid_transform = transforms.Compose([ToFloatTensor()])
+# train_transform = transforms.Compose([torch.nn.Identity()])#ToFloatTensor()
+# valid_transform = transforms.Compose([torch.nn.Identity()])#ToFloatTensor()
 
-class myDataset(Dataset):
+class MyDataset(Dataset):
     """create dataset"""
 
-    def __init__(self, X, y, transform=None, pool_dim=None):
-        X, y = np.vstack(X), np.vstack(y)
+    def __init__(self, X, y, transform=None, pool_dim=None, cache_size=100):
+        X = self.stack(X)
+        y = self.stack(y)
         self.data = X
+        self.label = self.to_label(y)
         self.transform = transform
-        self.label = torch.FloatTensor(y) if y.ndim == 2 else torch.LongTensor(y)
         self.pool_dim = pool_dim
+        self.cache_size = cache_size
+        self.loadbuffer = lru_cache(maxsize=self.cache_size)(self.__getitem__)
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, item):
-        X = self.data[item, :]
-        X = self.transform(X)
+        X = self.data[item]
         y = self.label[item]
         if self.pool_dim:
             X = F.adaptive_avg_pool1d(X, self.pool_dim)
         return X, y
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state['loadbuffer'] = self.__getitem__
+        return state
+    
+    def __setstate__(self, state):
+        state['loadbuffer'] = lru_cache(maxsize=100)(state['loadbuffer'])
+        self.__dict__.update(state)
+    
+    def stack(self, input):
+        try:
+            return torch.FloatTensor(np.vstack(input))
+        except:
+            return [torch.LongTensor(i) for i in input]
+        
+    def to_label(self, input):
+        if not type(input) == list:
+            return torch.FloatTensor(input) if input.ndim == 2 else torch.LongTensor(input)
+        else:
+            return [torch.LongTensor(i) for i in input]
 
 
-def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, mode='train', pool_dim=None):
+def collate_fn(batch):
+    x = [item[0] for item in batch]
+    x = torch.nn.utils.rnn.pad_sequence(x, batch_first=True, padding_value=0).unsqueeze(1)
+    y = [item[1] for item in batch]
+    y = torch.nn.utils.rnn.pad_sequence(y, batch_first=True, padding_value=0)
+    return x, y
+    
+    
+def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, mode='train', collate=True):
     
     data = pd.read_pickle(f'datasets/{ds}/{mode}.pkl')
     data_x = data['spectrum']
@@ -44,55 +76,55 @@ def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, 
         pass
     # else: raise ValueError("Argument 'STRATEGY['mode'] should be chhosen among ""train, pretrain, test and tune"".")
     ids = np.arange(len(data_x))
-    transform_train = bacteria_train_transform if ds == 'Bacteria' else train_transform
-    transform_valid = bacteria_valid_transform if ds == 'Bacteria' else valid_transform
+    # transform_train = bacteria_train_transform if ds == 'Bacteria' else train_transform
+    # transform_valid = bacteria_valid_transform if ds == 'Bacteria' else valid_transform
     stratify = None if mode=='pretrain' else data_y
+    if 'train' in mode:
+        if train_size is None:
+            data_train = pd.read_pickle(f'datasets/{ds}/train.pkl')
+            data_val = pd.read_pickle(f'datasets/{ds}/eval.pkl')
+            train_x = data_train['spectrum'].values[:1000]
+            train_y = data_train['label'].values[:1000]
+            val_x = data_val['spectrum'].values[:200]
+            val_y = data_val['label'].values[:200]
+            trainset = MyDataset(train_x, train_y)
+            valset = MyDataset(val_x, val_y)
 
-    if train_size is None:
-        data_train = pd.read_pickle(f'datasets/{ds}/train.pkl')
-        data_val = pd.read_pickle(f'datasets/{ds}/eval.pkl')
-        train_x = data_train['spectrum'].values
-        train_y = data_train['label'].values
-        val_x = data_val['spectrum'].values
-        val_y = data_val['label'].values
-        trainset = myDataset(train_x, train_y, transform=transform_train, pool_dim=pool_dim)
-        valset = myDataset(val_x, val_y, transform=transform_valid, pool_dim=pool_dim)
-
-    elif train_size:
-        data = pd.read_pickle(f'datasets/{ds}/{mode}.pkl')
-        data_x = data['spectrum'].values
-        train_id, val_id = tts(ids, shuffle=False, train_size=train_size, random_state=seed, stratify=stratify)
-        if not mode == 'pretrain':
-            data_y = data['label'].values
-            trainset = myDataset(data_x[train_id], data_y[train_id], transform=transform_train, pool_dim=pool_dim)
-            valset = myDataset(data_x[val_id], data_y[val_id], transform=transform_valid, pool_dim=pool_dim)
-        else: 
-            data_x = torch.FloatTensor(np.vstack(data_x)).unsqueeze(1)
-            trainset = TensorDataset(data_x[train_id])
-            valset = TensorDataset(data_x[val_id])
-    else:
+        else:
+            data = pd.read_pickle(f'datasets/{ds}/{mode}.pkl')
+            data_x = data['spectrum'].values
+            train_id, val_id = tts(ids, shuffle=False, train_size=train_size, random_state=seed, stratify=stratify)
+            if not mode == 'pretrain':
+                data_y = data['label'].values
+                trainset = MyDataset(data_x[train_id], data_y[train_id])
+                valset = MyDataset(data_x[val_id], data_y[val_id])
+            else: 
+                data_x = torch.FloatTensor(np.vstack(data_x)).unsqueeze(1)
+                trainset = TensorDataset(data_x[train_id])
+                valset = TensorDataset(data_x[val_id])
+    if mode == 'test':
         test_data = pd.read_pickle(f'datasets/{ds}/test.pkl')
         test_x = test_data['spectrum'].values
         test_y = test_data['label'].values
 
-        trainset = myDataset(data_x, data_y, transform=transform_train, pool_dim=pool_dim)
-        valset = myDataset(test_x, test_y, transform=transform_valid, pool_dim=pool_dim)
+        trainset = MyDataset(data_x, data_y)
+        valset = MyDataset(test_x, test_y)
 
+    collate_func = collate_fn if collate else None
     trainloader = DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, 
-                             shuffle=False, pin_memory=True, sampler=DistributedSampler(trainset))
+                             shuffle=False, pin_memory=True, sampler=DistributedSampler(trainset), collate_fn=collate_func)
     valloader = DataLoader(valset, batch_size=batch_size, num_workers=num_workers, 
-                           shuffle=False, pin_memory=True, sampler=DistributedSampler(valset))
+                           shuffle=False, pin_memory=True, sampler=DistributedSampler(valset), collate_fn=collate_func)
 
     return trainloader, valloader
 
 
-def make_testloader(ds, batch_size=128, num_workers=1, pool_dim=256):
+def make_testloader(ds, batch_size=128, num_workers=1, pool_dim=256, collate=True):
     data = pd.read_pickle(f'datasets/{ds}/test.pkl')
     data_x = data['spectrum'].values
     data_y = data['label'].values
-
-    transform_valid = bacteria_valid_transform if ds == 'Bacteria' else valid_transform
-
-    testset = myDataset(data_x, data_y, transform=transform_valid, pool_dim=pool_dim)
-    return DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    # transform_valid = bacteria_valid_transform if ds == 'Bacteria' else valid_transform
+    collate_func = collate_fn if collate else None
+    testset = MyDataset(data_x, data_y)
+    return DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, collate_fn=collate_func)
 

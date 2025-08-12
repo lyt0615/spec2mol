@@ -12,17 +12,25 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from torch.distributed import init_process_group
 import os
+from models.Transformer_modules import run_epoch, LossCompute, greedy_decode, LabelSmoothing, Collator, Variable
+
 
 def ddp_setup(rank: int, world_size: int):
-   """
-   Args:
-       rank: Unique identifier of each process
-      world_size: Total number of processes
-   """
-   os.environ["MASTER_ADDR"] = "localhost"
-   os.environ["MASTER_PORT"] = "12355"
-   torch.cuda.set_device(rank)
-   init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    """
+    Args:
+        rank: Unique identifier of each process
+        world_size: Total number of processes
+    """
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
+    torch.cuda.set_device(rank)
+    try:
+        init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    except RuntimeError:
+        os.environ["PL_TORCH_DISTRIBUTED_BACKEND"] = "gloo"
+        init_process_group(backend="gloo", rank=rank, world_size=world_size, 
+                      init_method="env://?use_libuv=False") # disable libuv
+
    
 def cleanup():
     dist.destroy_process_group()
@@ -55,30 +63,7 @@ def get_vib_masked(spec,
     masked_spec = spec.masked_fill(mask, mask_value)
         # mask = mask.view_as(spec)
     return mask, masked_spec
-         
-class ClassSpecificCE(nn.Module):
-    def __init__(self, lambda_weight=1):
-        super(ClassSpecificCE, self).__init__()
-        self.lambda_weight = lambda_weight
 
-    def forward(self, inputs, targets):
-        pred_1 = inputs['pred_1']
-        pred_2 = inputs['pred_2']
-        pred_3 = inputs['pred_3']
-        ind_positive_sample = inputs['ind_positive_sample']
-        with torch.no_grad():
-            n_positive_sample = int(torch.sum(ind_positive_sample))
-            ACC1 = int((pred_1.argmax(-1) == targets).sum()) / targets.shape[0]
-            ACC2 = int((pred_2.argmax(-1) == targets).sum()) / targets.shape[0]
-            ACC3 = int((pred_3.argmax(-1) == targets).sum()) / targets.shape[0]
-        loss_discrimination = F.binary_cross_entropy(pred_1, targets)  # included 'softmax'
-        if n_positive_sample != 0:
-            loss_interpretation = F.binary_cross_entropy(pred_2[ind_positive_sample], targets[ind_positive_sample])
-        else:
-            loss_interpretation = torch.tensor(0.0).cuda()
-        loss_total = loss_discrimination + loss_interpretation * self.lambda_weight
-        return {"loss_discrimination": loss_discrimination, "loss_interpretation": loss_interpretation, "loss_total": loss_total,
-                "n_positive_sample": n_positive_sample, 'ACC1': ACC1, 'ACC2': ACC2,'ACC3': ACC3}
     
 class AverageMeter:
     def __init__(self):
@@ -142,23 +127,27 @@ class EarlyStop:
 class Engine:
     def __init__(self, train_loader=None, val_loader=None, test_loader=None,
                  criterion=None, optimizer=None, scheduler=None, device='cpu',
-                 model=None, rank=None, mode='train'):
+                 model=None, **kwargs):
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader
+        self.src_length = kwargs['src_length']
+        self.max_len = kwargs['max_len']
+        mode = kwargs['mode']
         self.pretrain = 1 if mode=='pretrain' else 0
-
         self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler
         if nn.BatchNorm1d in list(model.modules()):
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model) 
+        rank = kwargs['rank']
         if not mode=='test':
-            self.model = DDP(model.to(rank), device_ids=[rank], find_unused_parameters=True) # model
+            self.model = DDP(model.to(rank), device_ids=[rank], find_unused_parameters=False) # model
+            self.device = self.model.device
         else: 
             self.device = device
             self.model=model.to(device)
-
+        # print(sum(param.untyped_storage().nbytes() for param in self.model.parameters()))
     def train_epoch(self, epoch, binary=False):
 
         losses = AverageMeter()
@@ -173,15 +162,19 @@ class Engine:
                 target = dataset[0][mask]
                 output = self.model(dataset[0]).unsqueeze(1)[mask]
             else: 
-                data, target = dataset
-                output = self.model(data)
+                
+                # data, target = dataset
+                data_generator = Collator(dataset, self.src_length, self.device)
+                output, loss = run_epoch(data_generator, self.model,
+                    LossCompute(self.model, self.criterion, None))
+                loss.backward()
             if binary:
                 output = torch.sigmoid(output)
-            loss = self.criterion(output, target.to(self.model.device))
-            loss.backward()
+            # loss = self.criterion(output, target.to(self.model.device))
+            # loss.backward()
             self.optimizer.step()
 
-            losses.update(loss.item(), target.size(0))
+            losses.update(loss.data.item(), data_generator.batch_size)
             bar.set_description(
                 f'Epoch{epoch:3d}, train loss:{losses.avg:6f}')
 
@@ -202,32 +195,43 @@ class Engine:
                     target = dataset[0][mask]
                     output = self.model(dataset[0]).unsqueeze(1)[mask]
                 else: 
-                    data, target = dataset
-                    output = self.model(data)
+                    # data, target = dataset
+                    data_generator = Collator(dataset, self.src_length, self.device)
+                    target = data_generator.tgt_y
+                    output, loss = run_epoch(data_generator, self.model,
+                                LossCompute(self.model, self.criterion, None))
+                    prediction = greedy_decode(self.model, data_generator, self.max_len)
                 if binary:
                     output = torch.sigmoid(output)
-                loss = self.criterion(output, target.to(self.model.device))
-                losses.update(loss.item(), target.size(0))
-                target = target.detach().cpu().numpy()
+                # loss = self.criterion(output, target.to(self.model.device))
+                losses.update(loss.item(), data_generator.batch_size)
+                output = output.detach().cpu().numpy()
                 
-                if not self.pretrain:
+                if self.pretrain:
+                    bar.set_description(
+                    f'Epoch{epoch:3d}, valid loss:{losses.avg:6f}')
+                else:
+                    flag = True
                     if target.ndim == 1:
-                        flag = True
                         prediction = torch.argmax(output, dim=1).view(-1).detach().cpu().numpy()
                         accuracy = (prediction == target).mean()
                         accuracies.update(accuracy.item(), data.size(0))
                         bar.set_description(
                             f'Epoch{epoch:3d}, valid loss:{losses.avg:6f} , accuracy:{accuracies.avg:6f}')
                     elif binary and len(set(target[:, 0])) == 2:
-                        flag = True
                         prediction = torch.greater_equal(output, 0.5).to(torch.float64).cpu().detach().numpy()
                         accuracy = metrics.f1_score(target, prediction, average='macro', zero_division=0.0)
                         accuracies.update(accuracy, data.size(0)) # accuracy.item()
                         bar.set_description(
                             f'Epoch{epoch:3d}, valid loss:{losses.avg:6f} , valid accuracy:{accuracies.avg:6f}')
-                else:
-                    bar.set_description(
-                        f'Epoch{epoch:3d}, valid loss:{losses.avg:6f}')
+                    else:
+                        # src_mask = Variable(torch.ones(1, 1, self.src_length))
+                        # accuracy = (output == target).mean()
+                        accuracy = metrics.accuracy_score(target, prediction, zero_division=0.0)
+                        accuracies.update(accuracy, data_generator.batch_size) # accuracy.item()
+                        bar.set_description(
+                            f'Epoch{epoch:3d}, valid loss:{losses.avg:6f} , valid accuracy:{accuracies.avg:6f}')                        
+
 
         if self.scheduler:
             self.scheduler.step()
@@ -249,25 +253,23 @@ class Engine:
         predicted = []
         true = []
         with torch.no_grad():
-            for _, (data, target) in enumerate(bar):
+            for _, dataset in enumerate(bar):
                 data, target = data.to(self.device), target.to(self.device)
-                output = self.model(data)
+                data_generator = Collator(dataset, self.src_length, self.device)
                 if binary:
+                    output = self.model(data)
+                    loss = self.criterion(output, target)
+                    target = target.detach().cpu().numpy()
                     output = torch.sigmoid(output)
-
-                loss = self.criterion(output, target)
-
-                target = target.detach().cpu().numpy()
-                if binary:
                     prediction = torch.greater_equal(output, 0.5).to(torch.float64).cpu().detach().numpy()
                     accuracy = metrics.f1_score(target, prediction, 
                                                 average='macro', zero_division=0.0)
                 else:
-                    prediction = torch.argmax(output, dim=1).view(-1).detach().cpu().numpy()
-                    accuracy = (prediction == target).mean()
+                    # src_mask = Variable(torch.ones(1, 1, self.src_length))
+                    prediction = greedy_decode(self.model, data_generator, self.max_len)
+                    accuracy = metrics.precision_score(target, output, average='micro', zero_division=0.0)
 
                 outputs.append(output.detach().cpu().numpy())
-
                 losses.update(loss.item(), data.size(0))
                 accuracies.update(accuracy, data.size(0))
                 bar.set_description(
@@ -296,41 +298,30 @@ def train_model(model, save_path, ds, **kwargs):
     from torch.optim.lr_scheduler import CosineAnnealingLR
     from torch.utils.tensorboard import SummaryWriter
     writer = SummaryWriter(log_dir = save_path)
-    pool_dim = 1024
+    
     ddp_setup(kwargs['rank'], kwargs['world_size'])
     train_loader, val_loader = make_trainloader(
         ds, batch_size=kwargs['batch_size'],
         num_workers=1, train_size=kwargs['train_size'],
-        seed=42, mode=kwargs['mode'], pool_dim=pool_dim)
+        seed=42, mode=kwargs['mode'], )
 
-    test_loader = make_testloader(ds, pool_dim=pool_dim) if not kwargs['mode']=='pretrain' else None
-    binary = True if 'ir' in ds or 'raman' in ds else False
+    test_loader = make_testloader(ds, ) if not kwargs['mode']=='pretrain' else None
+    binary = False  #True if 'ir' in ds or 'raman' in ds else 
     if kwargs['mode'] == 'pretrain':
         criterion = nn.MSELoss()
     elif binary:
-        if kwargs['use_pi']:
-            criterion = ClassSpecificCE
-        else:
-            criterion = torch.nn.BCELoss()
+        criterion = torch.nn.BCELoss()
     else:
-        criterion = torch.nn.CrossEntropyLoss()
-        
+        criterion = LabelSmoothing(size=11, padding_idx=0, 
+                                   smoothing=0.0, criterion=torch.nn.CrossEntropyLoss(reduction='none'))
     optimizer = torch.optim.AdamW(
         model.parameters(), **kwargs['Adam_params'])
-
-    if ds == 'ir':
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer=optimizer,
-                                                                                  T_0=40,
-                                                                                  T_mult=2)  # fcgformer
-    else:
-        scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
-    # mode = 'min' if not tune else 'max'
+    scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
     mode = 'max' if not kwargs['mode'] == 'pretrain' else 'min'
     es = EarlyStop(patience=kwargs['patience'], mode=mode, rank=kwargs['rank'])
-
     engine = Engine(train_loader=train_loader, val_loader=val_loader,
                     test_loader=test_loader,criterion=criterion, optimizer=optimizer, 
-                    scheduler=scheduler,model=model, rank=kwargs['rank'], mode=kwargs['mode'])
+                    scheduler=scheduler, model=model, **kwargs)
     # start to train 
     for epoch in range(kwargs['epoch']):
         train_loss = engine.train_epoch(epoch, binary=binary)
@@ -354,21 +345,21 @@ def train_model(model, save_path, ds, **kwargs):
 
 
 def test_model(model, ds, device='cpu', verbose=True, **kwargs):
-    pool_dim = 256 if model.__class__.__name__ == 'Pace' else 1024
-    test_loader = make_testloader(ds, pool_dim=pool_dim)
-    binary = True if 'ir' in ds or 'raman' in ds else False
-    criterion = torch.nn.BCELoss() if binary else torch.nn.CrossEntropyLoss()
+    
+    test_loader = make_testloader(ds, )
+    binary = False#True if 'ir' in ds or 'raman' in ds else 
+    criterion = torch.nn.BCELoss() if binary else torch.nn.CrossEntropyLoss(reduction='none')
     engine = Engine(test_loader=test_loader,
-                    criterion=criterion, model=model, device=device, mode=kwargs['mode'])
+                    criterion=criterion, model=model, device=device, **kwargs)
     outputs, pred, true, _, _ = engine.test_epoch(binary=binary)
 
     if verbose:
-        print(metrics.classification_report(true, pred, digits=4))
+        # print(metrics.classification_report(true, pred, digits=4))
         print('Exact match rate (EMR): %.4f\n' %metrics.accuracy_score(true, pred))
-        logging.info(metrics.classification_report(true, pred, digits=4))
+        # logging.info(metrics.classification_report(true, pred, digits=4))
         # logging.info(f'accuracy:{metrics.accuracy_score(true, pred):.5f}')
         logging.info('Exact match rate (EMR): %.4f\n' %metrics.accuracy_score(true, pred))
-        logging.info('Accuracy: %.4f\n' %(np.count_nonzero(true==pred)/pred.shape[0]/pred.shape[1]))
+        # logging.info('Precision: %.4f\n' %(np.count_nonzero(true==pred)/pred.shape[0]/pred.shape[1]))
     return outputs, pred, true
 
 def inf_time(model):

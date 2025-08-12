@@ -8,6 +8,9 @@ import os, time, json, logging, argparse, config, sys, torch
 from utils.utils_ddp import seed_everything, load_net_state, train_model, test_model
 import torch.multiprocessing as mp
 from torch.distributed import destroy_process_group
+mp.set_sharing_strategy('file_system')
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('---', add_help=False)
@@ -31,8 +34,6 @@ def get_args_parser():
                         help="start test")
     parser.add_argument('-debug', '--debug', action='store_true',
                         help="start debug")
-    
-
     parser.add_argument('--base_checkpoint',
                         help="Choose base model for fine-tune")
     parser.add_argument('--test_checkpoint',
@@ -185,7 +186,7 @@ def main(rank=None, world_size=None, save_every=None):
     if args.ds == 'ir_pretrain':
         tgt_vocab = 1024
     else:
-        tgt_vocab = 20
+        tgt_vocab = 21
     params['net']['tgt_vocab'] = tgt_vocab
 
 
