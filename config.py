@@ -8,7 +8,7 @@ NET = {'conv_ksize':3,
        'fc_dim':1024, 
        'fc_num_layers':3, 
        'mixer_num_layers':4,
-       'n_classes':957,
+       'tgt_vocab':957,
        'use_mixer':True
        }
 
@@ -16,8 +16,8 @@ NET = {'conv_ksize':3,
 STRATEGY = {
     'train': {
         "batch_size": 64,
-        "epoch": 200,
-        "patience": 600,
+        "epoch": 1000,
+        "patience": 200,
         'train_size': None,
         "optmizer": "Adam",
         "Adam_params": {"lr": 1e-4}, # for qm9s
@@ -41,3 +41,5 @@ STRATEGY = {
         "Adam_params": {"lr": 1e-5},
     }
 }
+
+tokens = ['<pad>', '<bos>', 'Cl','Br','C','c','O','o','N','n','S','s','F','I','P','(',')','=','#','1','2','3','@', '<eos>']

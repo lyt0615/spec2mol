@@ -102,8 +102,8 @@ class FPGrowingModule(nn.Module):
             output_preds.append(cur_pred)
         return output_preds
     
-def make_model(src_vocab, tgt_vocab, N=6,
-               d_model=512, d_ff=2048, h=8, dropout=0.1):
+    
+def make_model(tgt_vocab, src_vocab=1024, N=6, d_model=512, d_ff=2048, h=8, dropout=0.1, mode='train'):
     import copy
     "Helper: Construct a model from hyperparameters."
     spec_encoding = SpectralEncoding(d_model, 8, LayerNorm)
@@ -120,8 +120,14 @@ def make_model(src_vocab, tgt_vocab, N=6,
                                      c(ff), dropout), N),
         src_embed=nn.Sequential(spec_encoding, spec_pos_encoding),
         tgt_embed=nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
-        generator=Generator(d_model, tgt_vocab))
-
+        generator=Generator(d_model, tgt_vocab),
+        mode=mode)
+    # if mode =='pretrain_spec':
+    #     model = SpecEncoder(encoder=Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
+    #                 generator=Generator(d_model, tgt_vocab),
+    #                 src_embed=nn.Sequential(spec_encoding, spec_pos_encoding),)
+    # if mode == 'pretrain_mol':
+    #     model = nn.Sequential([layer[0] for layer in model.decoder.sublayer].next(), model.generator)   
     # This was important from their code.
     # Initialize parameters with Glorot / fan_avg.
     for p in model.parameters():
@@ -131,27 +137,15 @@ def make_model(src_vocab, tgt_vocab, N=6,
    
 if __name__ == "__main__":
     # from thop import profile
-    params = {'conv_ksize':3, 
-            'conv_padding':1, 
-            'conv_init_dim':32, 
-            'conv_final_dim':256, 
-            'conv_num_layers':4, 
-            'mp_ksize':2, 
-            'mp_stride':2, 
-            'fc_dim':1024, 
-            'fc_num_layers':0, 
-            'mixer_num_layers':4,
-            'tgt_vocab':957,
-            'use_mixer':True,
-            }
     x = torch.rand(3, 1, 1024)
     a = torch.tensor([1, 2, 3,4,5])        
-    b = torch.tensor([4, 5,6,8])           
-    c = torch.tensor([9,10])              
-    y = [a,b,c]
-    model, src_length = make_model(1024, 11)
-    data_generator = [Collator([x, y], src_length)]
-    # y = model(src, tgt, src_mask, tgt_mask)
+    b = torch.tensor([4, 5,6,8,0])           
+    c = torch.tensor([9,10,0,0,0])              
+    y = torch.vstack([a,b,c])
+    model, src_length = make_model(1024, 11, mode='pretrain_mol')
+    data_generator = Collator([x, y], src_length, torch.device('cpu'))
+    src, tgt, src_mask, tgt_mask = data_generator.src, data_generator.tgt, data_generator.src_mask, data_generator.tgt_mask
+    y = model(src, tgt, src_mask, tgt_mask)
     criterion = LabelSmoothing(size=11, padding_idx=0, smoothing=0.0)
     model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
                         torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))

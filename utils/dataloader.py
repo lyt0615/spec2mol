@@ -34,7 +34,7 @@ class MyDataset(Dataset):
         return X, y
 
 
-def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, tune=False, pool_dim=None):
+def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, tune=False, pool_dim=None):
 
     if tune:
         data = pd.read_pickle(f'datasets/{ds}/tune.pkl')
@@ -43,8 +43,8 @@ def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, 
 
     else:
         data = pd.read_pickle(f'datasets/{ds}/train.pkl')
-        data_x = data['spectrum'].values[:1000]
-        data_y = data['label'].values[:1000]
+        data_x = data['spectrum'].values
+        data_y = data['label'].values
 
     ids = np.arange(len(data_y))
 
@@ -85,7 +85,7 @@ def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, 
     return trainloader, valloader
 
 
-def make_testloader(ds, batch_size=128, num_workers=1, pool_dim=256):
+def make_testloader(ds, batch_size=128, num_workers=0, pool_dim=256):
     data = pd.read_pickle(f'datasets/{ds}/test.pkl')
     data_x = data['spectrum'].values
     data_y = data['label'].values

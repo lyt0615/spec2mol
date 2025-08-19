@@ -4,13 +4,11 @@
 @EMail       :aandytliu@gmail.com
 """
 
-import os, time, json, logging, argparse, config, sys, torch
-from utils.utils_ddp import seed_everything, load_net_state, train_model, test_model
+import os, time, logging, argparse, config
+from utils.utils_ddp import seed_everything, load_net_state, train_model, test_model, cleanup, get_smiles
 import torch.multiprocessing as mp
-from torch.distributed import destroy_process_group
 mp.set_sharing_strategy('file_system')
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
 
 def get_args_parser():
     parser = argparse.ArgumentParser('---', add_help=False)
@@ -24,36 +22,29 @@ def get_args_parser():
                         help="Choose GPU device")
     parser.add_argument('--gpu_ids', default=None,
                         help="Indices of GPUs to be used")
-    parser.add_argument('-pretrain', '--pretrain', action='store_true',
-                        help="start pretrain")
-    parser.add_argument('-train', '--train', action='store_true',
-                        help="start train")
-    parser.add_argument('-tune', '--tune', action='store_true',
-                        help="start tune")
-    parser.add_argument('-test', '--test', action='store_true',
-                        help="start test")
+    parser.add_argument('--mode', default='train',
+                        help="choose mode: 'train', 'test', 'pretrain_mol' or 'pretrain_spec'")
     parser.add_argument('-debug', '--debug', action='store_true',
                         help="start debug")
     parser.add_argument('--base_checkpoint',
                         help="Choose base model for fine-tune")
     parser.add_argument('--test_checkpoint',
                         help="Choose checkpoint for test")
+    parser.add_argument('--base_model_path', default=None,
+                        help="Choose checkpoint for reloading or finetuning")
     parser.add_argument('--seed',
                         default=2024,
                         help="Random seed")
     parser.add_argument('--max_len',
-                        default=1000,
+                        default=30,
                         help="Maxial length of output sequence when decoding")
     # params of CNN_exp & CNN_SE & MLPMixer
-    parser.add_argument('--n_mixer', 
-                        help="Number of MLPMixer1D")  
-    parser.add_argument('--depth', 
-                        help="Number of bottleneck blocks")   
-    parser.add_argument('--use_mixer', default=False,
-                        help="Use MLPMixer1D or not")      
-    parser.add_argument('--use_se', default=True,
-                        help="Use SE or not")  
-    
+    parser.add_argument('--depth', default=6,
+                        help="Transformer layers")  
+    parser.add_argument('--d_model', default=512,
+                        help="Transformer hidden dimension")  
+    parser.add_argument('--n_heads', default=8,
+                        help="Number of attention heads")      
     # params of strategy
     parser.add_argument('--train_size',
                         help="train size for train_val_split")
@@ -84,43 +75,29 @@ def catch_exception(ds, net_, ts, mode):
         print('unexpected tensorboard record has been deleted')
 
 
-def main(rank=None, world_size=None, save_every=None):
+def main(rank=None, world_size=1, gpu_ids=None):
     args = get_args_parser()
-    if args.train and args.ds == 'Bacteria':
+    mode = args.mode
+    if mode == 'train' and args.ds == 'Bacteria':
         args.lr = '1e-3'
         args.epoch = '50'
-    elif args.train and args.ds == 'ir':
-        args.lr = '2e-3'
+    elif mode == 'train':
+        args.lr = '1e-4'
         args.epoch = '600'
     else:
         args.lr = '1e-4'
         args.epoch = '200'
-
-    if args.tune and args.ds == 'Bacteria':
-        args.batch_size = '8'
-
     seed_everything(int(args.seed))
-    params = {'net': config.NET, 'strategy': config.STRATEGY['train'] if args.train or args.debug else config.STRATEGY['pretrain']}
-    if not args.test:
-        params['strategy']['save_every'] = save_every
+    params = {'net': config.NET, 'strategy': config.STRATEGY['train'] if mode == 'train' or args.debug else config.STRATEGY['pretrain']}
+    if not mode == 'test':
+        # os.environ["RANK"] = rank
+        # local_rank = int(os.environ["LOCAL_RANK"])
         params['strategy']['world_size'] = world_size
         params['strategy']['rank'] = rank
-        params['strategy']['gpu_ids'] = [int(i) for i in args.gpu_ids.split(',')] if args.gpu_ids else range(world_size)
-        mode = 'pretrain' if args.pretrain else 'train'
-    else:  
-        mode = 'test'
-    params['net']['use_mixer'] = eval(args.use_mixer) if type(args.use_mixer) == str else args.use_mixer
+        params['strategy']['gpu_ids'] = gpu_ids
     params['strategy']['mode'] = mode
-        
-    # if :
-    #     params['net']['use_se'] = eval(args.use_se) if type(args.use_se) == str else args.use_se
-    #     params['net']['use_res'] = eval(args.use_res) if type(args.use_res) == str else args.use_res
-    # params['use_pi']['use_pi'] = args.use_pi
-    if args.n_mixer:
-        params['net']['mixer_num_layers'] = int(args.n_mixer)
-    if args.depth:
-        params['net']['depth'] = int(args.depth)
-        
+    params['strategy']['checkpoint'] = torch.load(f'{args.base_model_path}.pth', 
+                                                  map_location={'cuda:%d' % 0: 'cuda:%d' % rank}) if args.base_model_path else None
 
     if args.batch_size:
         params['strategy']['batch_size'] = int(args.batch_size/world_size)
@@ -174,7 +151,7 @@ def main(rank=None, world_size=None, save_every=None):
     data_root = f"datasets/{ds}"
     save_path = f"checkpoints/{ds}/{net_}/{ts}"
 
-    if args.train:
+    if mode == 'train':
         if not os.path.exists(f"checkpoints/{ds}"):
             os.mkdir(f"checkpoints/{ds}")
         if not os.path.exists(f"checkpoints/{ds}/{net_}"):
@@ -183,10 +160,10 @@ def main(rank=None, world_size=None, save_every=None):
             os.mkdir(f"checkpoints/{ds}/{net_}/{ts}")
     elif FileExistsError: pass
 
-    if args.ds == 'ir_pretrain':
+    if mode == 'pretrain_spec':
         tgt_vocab = 1024
-    else:
-        tgt_vocab = 21
+    if mode == 'train' or mode == 'test':
+        tgt_vocab = len(config.tokens)
     params['net']['tgt_vocab'] = tgt_vocab
 
 
@@ -196,7 +173,8 @@ def main(rank=None, world_size=None, save_every=None):
 
     elif net_ == 'Transformer':
         from models.Transformer import make_model
-        net, src_length = make_model(1024, tgt_vocab)
+        N, d_model, h = args.depth, args.d_model, args.n_heads
+        net, src_length = make_model(tgt_vocab, N=N, d_model=d_model, h=h, mode=mode)
         params['strategy']['src_length'] = src_length
         params['strategy']['max_len'] = args.max_len
 
@@ -206,38 +184,42 @@ def main(rank=None, world_size=None, save_every=None):
     # ================================3. start to train/tune/test ======================================
     try:
 
-        if args.train or args.debug or args.pretrain:
+        if mode == 'train' or args.debug or 'pretrain' in mode:
+            if args.base_model_path:
+                net = load_net_state(net, params['strategy']['checkpoint']['model_state'])
             train_model(net, save_path, ds=args.ds, **params['strategy'])
-            destroy_process_group()
+            cleanup()
 
-        elif args.tune:
+        elif mode == 'tune':
             import torch
 
             base_model_path = args.base_model_path
             print(base_model_path)
             net = load_net_state(net, torch.load(f'{base_model_path}.pth', map_location={'cuda:%d' % 0: 'cuda:%d' % rank}))
             train_model(net, save_path=f"{base_model_path}/tune", ds=args.ds, **params['strategy'])
-            destroy_process_group()
+            cleanup()
 
-        elif args.test:
+        elif mode == 'test':
             import torch
-            
             test_model_path = args.test_checkpoint
             print(test_model_path)
             net = load_net_state(net, torch.load(test_model_path,
                                                 map_location={'cuda:0': device, 'cuda:1': device}))
-            test_model(net, device=device, ds=args.ds, **params['strategy'])
+            _, pred, true = test_model(net, device=device, ds=args.ds, **params['strategy'])
+            logging.info('Prediction, Target')
+            for p, t in zip(pred, true):
+                logging.info(f'{get_smiles(p)} {get_smiles(t)}\n')
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(e)
         catch_exception(ds, net_, ts, mode)
 
 if __name__ == "__main__":
-    save_every = 2
-    world_size = torch.cuda.device_count()
-    if not get_args_parser().test:
-        mp.spawn(main, args=(world_size, save_every,), nprocs=world_size)
+    if not get_args_parser().mode == 'test':
+        gpu_ids = get_args_parser().gpu_ids
+        world_size = len(gpu_ids.split(','))
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
+        mp.spawn(main, args=(world_size, gpu_ids), nprocs=world_size)
     else:
         main()

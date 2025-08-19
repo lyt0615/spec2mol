@@ -16,7 +16,7 @@ from functools import lru_cache
 class MyDataset(Dataset):
     """create dataset"""
 
-    def __init__(self, X, y, transform=None, pool_dim=None, cache_size=100):
+    def __init__(self, X, y, transform=None, pool_dim=None, cache_size=10):
         X = self.stack(X)
         y = self.stack(y)
         self.data = X
@@ -55,7 +55,7 @@ class MyDataset(Dataset):
         if not type(input) == list:
             return torch.FloatTensor(input) if input.ndim == 2 else torch.LongTensor(input)
         else:
-            return [torch.LongTensor(i) for i in input]
+            return input
 
 
 def collate_fn(batch):
@@ -66,11 +66,11 @@ def collate_fn(batch):
     return x, y
     
     
-def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, mode='train', collate=True):
+def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, mode='train'):
     
     data = pd.read_pickle(f'datasets/{ds}/{mode}.pkl')
     data_x = data['spectrum']
-    if not mode=='pretrain':
+    if not 'pretrain' in mode:
         data_y = data['label'].values
     else:
         pass
@@ -78,23 +78,23 @@ def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, 
     ids = np.arange(len(data_x))
     # transform_train = bacteria_train_transform if ds == 'Bacteria' else train_transform
     # transform_valid = bacteria_valid_transform if ds == 'Bacteria' else valid_transform
-    stratify = None if mode=='pretrain' else data_y
+    stratify = None if 'pretrain' in mode else data_y
+    assert 'train' in mode or mode == 'test'
     if 'train' in mode:
         if train_size is None:
             data_train = pd.read_pickle(f'datasets/{ds}/train.pkl')
             data_val = pd.read_pickle(f'datasets/{ds}/eval.pkl')
-            train_x = data_train['spectrum'].values[:1000]
-            train_y = data_train['label'].values[:1000]
-            val_x = data_val['spectrum'].values[:200]
-            val_y = data_val['label'].values[:200]
+            train_x = data_train['spectrum'].values
+            train_y = data_train['label'].values
+            val_x = data_val['spectrum'].values
+            val_y = data_val['label'].values
             trainset = MyDataset(train_x, train_y)
             valset = MyDataset(val_x, val_y)
-
         else:
             data = pd.read_pickle(f'datasets/{ds}/{mode}.pkl')
             data_x = data['spectrum'].values
             train_id, val_id = tts(ids, shuffle=False, train_size=train_size, random_state=seed, stratify=stratify)
-            if not mode == 'pretrain':
+            if mode == 'train':
                 data_y = data['label'].values
                 trainset = MyDataset(data_x[train_id], data_y[train_id])
                 valset = MyDataset(data_x[val_id], data_y[val_id])
@@ -106,20 +106,17 @@ def make_trainloader(ds, batch_size=16, num_workers=1, train_size=0.8, seed=42, 
         test_data = pd.read_pickle(f'datasets/{ds}/test.pkl')
         test_x = test_data['spectrum'].values
         test_y = test_data['label'].values
-
         trainset = MyDataset(data_x, data_y)
         valset = MyDataset(test_x, test_y)
-
-    collate_func = collate_fn if collate else None
+    collate_func = collate_fn if mode == 'train' else None
     trainloader = DataLoader(trainset, batch_size=batch_size, num_workers=num_workers, 
                              shuffle=False, pin_memory=True, sampler=DistributedSampler(trainset), collate_fn=collate_func)
     valloader = DataLoader(valset, batch_size=batch_size, num_workers=num_workers, 
                            shuffle=False, pin_memory=True, sampler=DistributedSampler(valset), collate_fn=collate_func)
-
     return trainloader, valloader
 
 
-def make_testloader(ds, batch_size=128, num_workers=1, pool_dim=256, collate=True):
+def make_testloader(ds, batch_size=128, num_workers=0, pool_dim=256, collate=True):
     data = pd.read_pickle(f'datasets/{ds}/test.pkl')
     data_x = data['spectrum'].values
     data_y = data['label'].values

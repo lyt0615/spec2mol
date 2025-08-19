@@ -4,37 +4,137 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 import copy
-import time
 from torch.autograd import Variable
 
+
+class MultiHeadedAttention(nn.Module):
+    def __init__(self, h, d_model, dropout=0.1):
+        "Take in model size and number of heads."
+        super(MultiHeadedAttention, self).__init__()
+        assert d_model % h == 0
+        # We assume d_v always equals d_k
+        self.d_k = d_model // h
+        self.h = h
+        self.linears = clones(nn.Linear(d_model, d_model), 4)
+        self.attn = None
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, query, key, value, mask=None):
+        "Implements Figure 2"
+        if mask is not None:
+            # Same mask applied to all h heads.
+            mask = mask.unsqueeze(1)
+        nbatches = query.size(0)
+
+        # 1) Do all the linear projections in batch from d_model => h x d_k
+        query, key, value = \
+            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
+             for l, x in zip(self.linears, (query, key, value))]
+
+        # 2) Apply attention on all the projected vectors in batch.
+        x, self.attn = attention(query, key, value, mask=mask,
+                                 dropout=self.dropout)
+
+        # 3) "Concat" using a view and apply a final linear.
+        x = x.transpose(1, 2).contiguous().view(
+            nbatches, -1, self.h * self.d_k)
+        return self.linears[-1](x)
+    
+    
 class EncoderDecoder(nn.Module):
     """
     A standard Encoder-Decoder architecture. Base for this and many 
     other models.
     """
 
-    def __init__(self, encoder, decoder, src_embed, tgt_embed, generator):
+    def __init__(self, encoder, decoder, src_embed, tgt_embed, generator, mode='train'):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.src_embed = src_embed
         self.tgt_embed = tgt_embed
         self.generator = generator
-
-    def forward(self, src, tgt, src_mask, tgt_mask):
-        "Take in and process masked src and target sequences."
-        return self.decode(self.encode(src, src_mask), src_mask,
-                           tgt, tgt_mask)
-
+        self.mode = mode
+        if mode == 'pretrain_spec':
+            for p in self.decoder.parameters():
+                p.requires_grad = False
+            for p in self.tgt_embed.parameters():
+                p.requires_grad = False
+                
+        if mode == 'pretrain_mol':
+            for p in self.encoder.parameters():
+                p.requires_grad = False
+            for p in self.src_embed.parameters():
+                p.requires_grad = False
+            for layer in self.decoder.layers:
+                for sublayer in layer.sublayer[1:]:
+                    for p in sublayer.parameters():
+                        p.requires_grad = False
+                          
+    def forward(self, src=None, tgt=None, src_mask=None, tgt_mask=None):
+        if self.mode == 'train' or self.mode == 'test':
+            "Take in and process masked src and target sequences."
+            return self.decode(self.encode(src, src_mask), src_mask,
+                            tgt, tgt_mask)
+        elif self.mode == 'pretrain_spec':
+            return self.generator(self.encode(src, None)[:, 0])
+        elif self.mode == 'pretrain_mol':
+            tgt = self.tgt_embed(tgt)
+            for layer in self.decoder.layers:
+                x = layer.sublayer[0](tgt, lambda x: layer.self_attn(x, x, x, None))
+            return self.generator(x[:, 0])
+        
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)
 
     def decode(self, memory, src_mask, tgt, tgt_mask):
-        try:
-            return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask)
-        except AttributeError:         print(tgt)
+        return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask)
 
 
+class SpecEncoder(nn.Module):
+
+    def __init__(self, encoder, src_embed, generator):
+        super().__init__()
+        self.encoder = encoder
+        self.src_embed = src_embed
+        self.generator = generator
+    def forward(self, src, src_mask):
+        return self.generator(self.encoder(self.src_embed(src), src_mask)[:, 0])
+    
+    
+class MolEncoder(nn.Module):
+    """
+    只保留 DecoderLayer 的第一层：Masked Self-Attention
+    输入：  tgt      [batch, tgt_len, d_model]
+           tgt_mask [batch, 1, tgt_len, tgt_len]  # 下三角 0/1 掩码
+    输出：  out      [batch, tgt_len, d_model]
+    """
+
+    def __init__(self, d_model, n_heads, dropout=0.1):
+        super().__init__()
+        # 复制原结构的 Norm + Dropout + Residual
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+        # 重新创建一个 MultiHeadAttention（与原 DecoderLayer 的 self_attn 同配置）
+        self.self_attn = MultiHeadedAttention(
+            embed_dim=d_model,
+            num_heads=n_heads,
+            dropout=dropout,
+            batch_first=True   # PyTorch ≥1.9
+        )
+
+    def forward(self, x, tgt_mask=None):
+        # Norm
+        normed = self.norm(x)
+        # 带掩码的自注意力
+        attn_out, _ = self.self_attn(normed, normed, normed,
+                                     attn_mask=tgt_mask)   # tgt_mask 就是下三角
+        # Residual + Dropout
+        out = x + self.dropout(attn_out)
+        return out
+    
+    
 class Generator(nn.Module):
     "Define standard linear + softmax generation step."
 
@@ -43,7 +143,7 @@ class Generator(nn.Module):
         self.proj = nn.Linear(d_model, vocab)
 
     def forward(self, x):
-        return F.log_softmax(self.proj(x), dim=-1)
+        return self.proj(x) # F.log_softmax(self.proj(x), dim=-1)
 
 
 def clones(module, N):
@@ -165,40 +265,6 @@ def attention(query, key, value, mask=None, dropout=None):
     return torch.matmul(p_attn, value), p_attn
 
 
-class MultiHeadedAttention(nn.Module):
-    def __init__(self, h, d_model, dropout=0.1):
-        "Take in model size and number of heads."
-        super(MultiHeadedAttention, self).__init__()
-        assert d_model % h == 0
-        # We assume d_v always equals d_k
-        self.d_k = d_model // h
-        self.h = h
-        self.linears = clones(nn.Linear(d_model, d_model), 4)
-        self.attn = None
-        self.dropout = nn.Dropout(p=dropout)
-
-    def forward(self, query, key, value, mask=None):
-        "Implements Figure 2"
-        if mask is not None:
-            # Same mask applied to all h heads.
-            mask = mask.unsqueeze(1)
-        nbatches = query.size(0)
-
-        # 1) Do all the linear projections in batch from d_model => h x d_k
-        query, key, value = \
-            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2)
-             for l, x in zip(self.linears, (query, key, value))]
-
-        # 2) Apply attention on all the projected vectors in batch.
-        x, self.attn = attention(query, key, value, mask=mask,
-                                 dropout=self.dropout)
-
-        # 3) "Concat" using a view and apply a final linear.
-        x = x.transpose(1, 2).contiguous().view(
-            nbatches, -1, self.h * self.d_k)
-        return self.linears[-1](x)
-
-
 class PositionwiseFeedForward(nn.Module):
     "Implements FFN equation."
 
@@ -219,10 +285,7 @@ class Embeddings(nn.Module):
         self.d_model = d_model
 
     def forward(self, x):
-        try:
-            return self.lut(x) * math.sqrt(self.d_model)
-        except RuntimeError:print(x)
-
+        return self.lut(x) * math.sqrt(self.d_model)
 
 class PositionalEncoding(nn.Module):
     "Implement the PE function."
@@ -284,7 +347,7 @@ class LearnableClassEmbedding(nn.Module):
         return x
     
 def make_model(src_vocab, tgt_vocab, N=6,
-               d_model=512, d_ff=2048, h=8, dropout=0.1):
+               d_model=512, d_ff=2048, h=8, dropout=0.1, mode='train'):
     "Helper: Construct a model from hyperparameters."
     c = copy.deepcopy
     attn = MultiHeadedAttention(h, d_model)
@@ -296,8 +359,10 @@ def make_model(src_vocab, tgt_vocab, N=6,
                                      c(ff), dropout), N),
         src_embed=nn.Sequential(Embeddings(d_model, src_vocab), c(position)),
         tgt_embed=nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
-        generator=Generator(d_model, tgt_vocab))
-
+        generator=Generator(d_model, tgt_vocab),
+        mode=mode)
+    return model
+        
     # This was important from their code.
     # Initialize parameters with Glorot / fan_avg.
     for p in model.parameters():
@@ -307,10 +372,11 @@ def make_model(src_vocab, tgt_vocab, N=6,
 
 
 class Collator:
-    def __init__(self, batch, src_length, device):
+    def __init__(self, batch, src_length, device=torch.device('cpu')):
         self.device = device
         self.src, self.tgt, self.src_mask, self.tgt_mask, self.tgt_y, self.ntokens = [i.to(self.device) for i in self.collate(batch, src_length)]
         self.batch_size = self.src.size(0)
+        self.true_seq = [seq[torch.where(seq)[0][1:]] for seq in batch[1]]
         
     def make_pad_mask(self, lengths: torch.Tensor, max_len: int = None):
         """
@@ -324,7 +390,7 @@ class Collator:
         return mask.unsqueeze(1).to(self.device)
 
     def make_causal_mask(self, sz: int):
-        return torch.triu(torch.ones(sz, sz, dtype=torch.bool, device=self.device), diagonal=1)
+        return torch.triu(torch.ones(sz, sz, dtype=torch.int, device=self.device), diagonal=1)
     def collate(self, batch, src_length=None, padding_value=0):
         if src_length is None:
             src_lengths = torch.tensor([k.shape[-1] for k in batch[0]])
@@ -335,12 +401,12 @@ class Collator:
         # else:
         src = torch.nn.utils.rnn.pad_sequence(batch[0], batch_first=True, padding_value=padding_value)
         src_mask = self.make_pad_mask(src_lengths, src.size(-1))   # [B,1,1,Ls]
-        tgt = batch[1][:,:-1]
+        tgt = batch[1] # [:,:-1]
         tgt_y = batch[1][:,1:]
         ntokens = sum([(y!=padding_value).sum() for y in tgt_y])
         # tgt = torch.nn.utils.rnn.pad_sequence(tgt, batch_first=True, padding_value=padding_value)
         # tgt_y = torch.nn.utils.rnn.pad_sequence(tgt_y, batch_first=True, padding_value=padding_value)
-        tgt_lengths = torch.tensor([j.shape[-1] for j in tgt_y])
+        tgt_lengths = torch.tensor([j.shape[-1] for j in tgt])
         tgt_pad_mask = self.make_pad_mask(tgt_lengths, tgt.size(-1))  # [B,1,1,Lt]
         causal_mask = self.make_causal_mask(tgt.size(1))  # [Lt,Lt]
         tgt_mask = tgt_pad_mask | causal_mask #tgt_pad_mask  .unsqueeze(0).unsqueeze(0)
@@ -380,10 +446,17 @@ def run_epoch(data_iter, model, loss_compute):
     # for i, batch in enumerate(data_iter):
     out = model.forward(data_iter.src, data_iter.tgt,
                         data_iter.src_mask, data_iter.tgt_mask)
+    out = F.softmax(out, dim=-1)
+    out = model.module.generator(out)
+    # shift_logits = out[:, :-1, :].contiguous().view(-1, 24)
+    # shift_labels = data_iter.tgt[:, 1:].contiguous().view(-1)
+    # print('shift_labels[:10] =', shift_labels[:10].tolist())
+    # print('shift_logits[0, eos] =', shift_logits[0, 23].item())
+    # print('generator.bias[eos] =', model.module.generator.proj.bias[23].item())
+    # print('generator.bias.mean() =', model.module.generator.proj.bias.mean().item())    
     loss = loss_compute(out, data_iter.tgt_y, data_iter.ntokens)
     total_loss += loss
     total_tokens += data_iter.ntokens
-    tokens += data_iter.ntokens
     # if i % 50 == 1:
     #     elapsed = time.time() - start
     #     print("Epoch Step: %d Loss: %f Tokens per Sec: %f" %
@@ -446,26 +519,26 @@ def get_std_opt(model):
 class LabelSmoothing(nn.Module):
     "Implement label smoothing."
 
-    def __init__(self, size, padding_idx, criterion, smoothing=0.0):
+    def __init__(self, padding_idx, criterion, smoothing=0.0):
         super(LabelSmoothing, self).__init__()
         self.criterion = criterion  #nn.KLDivLoss(reduction='sum')
         self.padding_idx = padding_idx
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
-        self.size = size
+        # self.size = size
         self.true_dist = None
 
     def forward(self, x, target):
         # assert x.size(1) == self.size
         true_dist = x.data.clone()
-        true_dist.fill_(self.smoothing / (self.size - 2))
+        true_dist.fill_(self.smoothing)
         true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
         true_dist[:, self.padding_idx] = 0
         mask = torch.nonzero(target.data == self.padding_idx)
         if mask.dim() > 0:
             true_dist.index_fill_(0, mask.squeeze(), 0.0)
-        self.true_dist = true_dist
-        return self.criterion(x, Variable(true_dist, requires_grad=False))
+        self.true_dist = true_dist.argmax(dim=-1).long()
+        return self.criterion(x, Variable(self.true_dist, requires_grad=False))
 
 
 def data_gen(src, tgt, nbatches):
@@ -481,14 +554,12 @@ def data_gen(src, tgt, nbatches):
 class LossCompute:
     "A simple loss compute and train function."
 
-    def __init__(self, generator, criterion, opt=None):
-        self.generator = generator.module.generator
+    def __init__(self, criterion, opt=None):
         self.criterion = criterion
         self.opt = opt
 
     def __call__(self, x, y, norm):
-        x = self.generator(x)
-        loss = self.criterion(x.contiguous().view(-1, x.size(-1)),
+        loss = self.criterion(x[:, :-1, :].contiguous().view(-1, x.size(-1)),
                               y.contiguous().view(-1)).sum() / norm
         if self.opt is not None:
             self.opt.step()
@@ -496,25 +567,40 @@ class LossCompute:
         return loss * norm
 
 
-def greedy_decode(model, data_generator, max_len, start_symbol=0):
-    model = model.module
-    src, src_mask = data_generator.src, data_generator.src_mask
-    # tgt_mask = data_generator.tgt_mask
-    memory = model.encode(src, Variable(src_mask))
-    ys = torch.ones(src.size(0), 1, device=src.device).fill_(start_symbol)
-    for i in range(max_len-1):
-        out = model.decode(memory, src_mask,
-                           Variable(ys),
-                           Variable(subsequent_mask(ys.size(1))
-                                    .type_as(src.data)))
-        prob = model.generator(out[:, -1])
-        _, next_word = torch.max(prob, dim=1)
-        next_word = next_word.data[:, 0]
-        ys = torch.cat([ys, torch.ones(1, 1, dtype=torch.long).fill_(next_word)], dim=1)
-        # ys[:, i+1] = next_word
-        if next_word.data == max_len+1:
-            break
-    return ys
+def greedy_decode(model, data_generator, max_len, start_symbol=0, sample_num=None):
+    import pandas as pd
+    if type(model) == torch.nn.parallel.DistributedDataParallel:
+        model = model.module 
+    predlist = []
+    eos = data_generator.tgt_y.max()
+    # lengths = [len(seq) for seq in data_generator.true_seq]
+    # print('mean', np.mean(lengths), 'max', np.max(lengths), 'pct 90', np.percentile(lengths, 90))
+    sample_num = sample_num if sample_num else len(data_generator.src)
+    for i in range(sample_num):
+        src, src_mask = data_generator.src[i].unsqueeze(0), Variable(torch.ones(1, 1, 128)).to(data_generator.device)
+        ys = torch.ones(1, 1, device=src.device, dtype=torch.long).fill_(start_symbol)
+        memory = model.encode(src, Variable(src_mask))
+        for step in range(max_len):
+            tgt_mask = Variable(subsequent_mask(step+1).type_as(data_generator.tgt_mask))
+            out = model.decode(memory, src_mask,
+                            Variable(ys),
+                            tgt_mask)
+            prob = F.softmax(model.generator(out[:, -1]), dim=-1)
+            _, next_word = torch.max(prob, dim=-1)
+            next_word = next_word.data[0]
+            # ys[:, i+1] = next_word
+            ys = torch.cat([ys, torch.ones(1, 1).fill_(next_word).type_as(data_generator.tgt)], dim=1)
+    #         print(f"mask shape={tgt_mask.shape} | "
+    #   f"logits[:5]={prob[0,:5].tolist()} {prob.topk(5).indices.tolist()}| "
+    #   f"chosen={next_word.item()} prob={prob[0,next_word.item()].item():.3f}")
+            if next_word == eos:
+                break
+
+        predlist.append(ys)
+        # print(ys)
+    # pd.to_pickle([data_generator.src, data_generator.src_mask, data_generator.tgt,
+    #         data_generator.tgt_mask, prob],'data.pkl')
+    return predlist
 
 
 def seed_everything(seed):

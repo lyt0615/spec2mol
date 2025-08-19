@@ -2,27 +2,88 @@ import logging
 from tqdm import tqdm
 import numpy as np
 import random
-import os
 import torch
 from sklearn import metrics
 from utils.dataloader_ddp import make_trainloader, make_testloader
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 from torch.distributed import init_process_group
 import os
-from models.Transformer_modules import run_epoch, LossCompute, greedy_decode, LabelSmoothing, Collator, Variable
+from collections import Counter
+from models.Transformer_modules import run_epoch, LossCompute, greedy_decode, LabelSmoothing, Collator
+from config import tokens
 
 
-def ddp_setup(rank: int, world_size: int):
+def get_smiles(label):
+    smiles = ''
+    for l in label:
+        smiles += tokens[l]
+    return smiles
+
+ 
+def eval_canonical_smiles(pred, target):
+    
+    from rdkit import Chem
+    true = 0
+    false = 0
+    invalid = 0
+    for i, j in zip(pred, target):
+        try:
+            canonical_pred = Chem.MolToSmiles(Chem.MolFromSmiles(i))
+            if canonical_pred == j: 
+                true += 1
+            else:
+                false += 1
+        except:
+            invalid += 1
+            continue
+    return np.array([true, false, invalid])
+
+
+def eval_tokens(prediction, target):
+    true = 0
+    for p, t in zip(prediction, target):
+        for i in range(len(t)):
+            try:
+                if (p[i] == t[i]).all():
+                    true += 1
+            except IndexError: break
+    return true
+
+
+def ddp_setup(rank: int, world_size: int, gpu_ids: str):
+    """
+    Args:
+        rank: Unique identifier of each process
+        world_size: Total number of processes
+        gpu_ids: GPU indices like "2,3"
+    """
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
+    torch.cuda.set_device(rank)
+    # with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    #     s.bind(('', 0))
+    #     master_port = str(s.getsockname()[1])
+    os.environ["MASTER_PORT"] = '29511'
+    os.environ["MASTER_ADDR"] = "localhost"
+    try:
+        dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    except RuntimeError:
+        os.environ["PL_TORCH_DISTRIBUTED_BACKEND"] = "gloo"
+        dist.init_process_group(backend="gloo", rank=rank, world_size=world_size,
+                                init_method="env://?use_libuv=False")
+        
+        
+def ddp_setup_1(rank: int, world_size: int, gpu_ids):
     """
     Args:
         rank: Unique identifier of each process
         world_size: Total number of processes
     """
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
+    os.environ["MASTER_PORT"] = "29500"
+    os.environ['CUDA_VISIBLE_DIVICES'] = gpu_ids
     torch.cuda.set_device(rank)
     try:
         init_process_group(backend="nccl", rank=rank, world_size=world_size)
@@ -33,7 +94,9 @@ def ddp_setup(rank: int, world_size: int):
 
    
 def cleanup():
+    dist.barrier()
     dist.destroy_process_group()
+    
     
 def seed_everything(seed):
     random.seed(seed)
@@ -86,47 +149,70 @@ class AverageMeter:
 
 
 class EarlyStop:
-    def __init__(self, patience=10, mode='max', delta=0.0001, rank=0):
-        self.patientce = patience
+    def __init__(self, patience=5, mode='max', delta=0.0001, rank=0):
+        self.patience = patience
         self.counter = 0
         self.mode = mode
         self.best_score = None
         self.early_stop = False
         self.delta = delta
         self.rank = rank
+        self.epoch = 0
         if self.mode == 'min':
             self.val_score = np.inf
         else:
             self.val_score = -np.inf
 
-    def __call__(self, epoch_score, model, model_path):
-        if self.mode == 'min':
-            score = -1. * epoch_score
+    def __call__(self, epoch_score, model, model_path, optimizer, lr_scheduler):
+        if self.rank == 0:
+            if self.mode == 'min':
+                score = -1. * epoch_score
+            else:
+                score = np.copy(epoch_score)
+            if self.best_score is None:
+                self.best_score = score
+                self.save_checkpoint(epoch_score, model, model_path, optimizer, lr_scheduler)
+            elif score < self.best_score + self.delta:
+                self.counter += 1
+                print(f'Early stopper count: {self.counter}/{self.patience}')
+                # if self.counter >= self.patience:
+                #     self.early_stop = True
+            else:
+                self.best_score = score
+                self.save_checkpoint(epoch_score, model, model_path, optimizer, lr_scheduler)
+                self.counter = 0
+            self.early_stop = torch.tensor([int(self.counter >= self.patience)]).cuda()
         else:
-            score = np.copy(epoch_score)
-        if self.best_score is None:
-            self.best_score = score
-            self.save_checkpoint(epoch_score, model, model_path, self.rank)
-        elif score < self.best_score + self.delta:
-            self.counter += 1
-            if self.counter >= self.patientce:
-                self.early_stop = True
-        else:
-            self.best_score = score
-            self.save_checkpoint(epoch_score, model, model_path, self.rank)
-            self.counter = 0
-
-    def save_checkpoint(self, epoch_score, model, model_path, rank):
-        if rank == 0:
-            torch.save(model.state_dict(), model_path)
-            self.val_score = epoch_score
+            self.early_stop = torch.tensor([0]).cuda()
+        dist.broadcast(self.early_stop, src=0)
+        return epoch_score
+    
+    def save_checkpoint(self, epoch_score, model, model_path, optimizer, lr_scheduler):
+        flag = False
+        if self.rank == 0:
+            epoch = int(model_path.split('/')[-1].split('_')[0])
+            # if self.epoch <= 1000:
+            if epoch - self.epoch >= 20:
+                flag = True
+                self.epoch = epoch
+            # else: flag = True
+            if flag:
+                torch.save({
+                    'model_state': model.state_dict(),
+                    'optimizer_state': optimizer.state_dict(),
+                    'lr_scheduler_state': lr_scheduler.state_dict(),
+                    'epoch': self.epoch,
+                    }, model_path)
+                self.val_score = epoch_score
+                print('🤖: I May... be Paranoid, but... not an... Agent...')
+            else: pass
         else: pass
-        dist.barrier()
+        # dist.barrier()
 
 
 class Engine:
     def __init__(self, train_loader=None, val_loader=None, test_loader=None,
-                 criterion=None, optimizer=None, scheduler=None, device='cpu',
+                 criterion=None, optimizer=None, lr_scheduler=None, device='cpu',
                  model=None, **kwargs):
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -134,22 +220,22 @@ class Engine:
         self.src_length = kwargs['src_length']
         self.max_len = kwargs['max_len']
         mode = kwargs['mode']
-        self.pretrain = 1 if mode=='pretrain' else 0
+        self.pretrain = 1 if 'pretrain' in mode else 0
         self.criterion = criterion
         self.optimizer = optimizer
-        self.scheduler = scheduler
-        if nn.BatchNorm1d in list(model.modules()):
-            model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model) 
-        rank = kwargs['rank']
-        if not mode=='test':
+        self.lr_scheduler = lr_scheduler
+        # if nn.BatchNorm1d in list(model.modules()):
+        #     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model) 
+        if not mode == 'test': 
+            rank = kwargs['rank'] 
             self.model = DDP(model.to(rank), device_ids=[rank], find_unused_parameters=False) # model
             self.device = self.model.device
         else: 
             self.device = device
             self.model=model.to(device)
         # print(sum(param.untyped_storage().nbytes() for param in self.model.parameters()))
+        
     def train_epoch(self, epoch, binary=False):
-
         losses = AverageMeter()
         self.model.train()
         self.train_loader.sampler.set_epoch(epoch)
@@ -160,29 +246,26 @@ class Engine:
             if self.pretrain:
                 mask, data = get_vib_masked(dataset[0])
                 target = dataset[0][mask]
-                output = self.model(dataset[0]).unsqueeze(1)[mask]
-            else: 
-                
+                output = self.model(data, None).unsqueeze(1)[mask]
+                loss = self.criterion(output, target.to(self.model.device))
+                batch_size = target.shape[0]
+            else:  
                 # data, target = dataset
                 data_generator = Collator(dataset, self.src_length, self.device)
                 output, loss = run_epoch(data_generator, self.model,
-                    LossCompute(self.model, self.criterion, None))
-                loss.backward()
+                    LossCompute(self.criterion, None))
+                batch_size = data_generator.batch_size
             if binary:
                 output = torch.sigmoid(output)
-            # loss = self.criterion(output, target.to(self.model.device))
-            # loss.backward()
+            loss.backward()
             self.optimizer.step()
-
-            losses.update(loss.data.item(), data_generator.batch_size)
+            losses.update(loss.data.item(), batch_size)
             bar.set_description(
                 f'Epoch{epoch:3d}, train loss:{losses.avg:6f}')
-
         logging.info(f'Epoch{epoch:3d}, train loss:{losses.avg:6f}')
         return losses.avg
 
     def evaluate_epoch(self, epoch, binary=False):
-
         accuracies = AverageMeter()
         losses = AverageMeter()
         flag = True
@@ -193,18 +276,21 @@ class Engine:
                 if self.pretrain:
                     mask, data = get_vib_masked(dataset[0])
                     target = dataset[0][mask]
-                    output = self.model(dataset[0]).unsqueeze(1)[mask]
+                    output = self.model(data, None).unsqueeze(1)[mask]
+                    loss = self.criterion(output, target.to(self.model.device))
+                    batch_size = output.shape[0]
                 else: 
                     # data, target = dataset
                     data_generator = Collator(dataset, self.src_length, self.device)
                     target = data_generator.tgt_y
                     output, loss = run_epoch(data_generator, self.model,
-                                LossCompute(self.model, self.criterion, None))
-                    prediction = greedy_decode(self.model, data_generator, self.max_len)
+                                LossCompute(self.criterion, None))
+                    batch_size = data_generator.batch_size
+                    # prediction = greedy_decode(self.model, data_generator, self.max_len)
                 if binary:
                     output = torch.sigmoid(output)
                 # loss = self.criterion(output, target.to(self.model.device))
-                losses.update(loss.item(), data_generator.batch_size)
+                losses.update(loss.item(), batch_size)
                 output = output.detach().cpu().numpy()
                 
                 if self.pretrain:
@@ -227,36 +313,39 @@ class Engine:
                     else:
                         # src_mask = Variable(torch.ones(1, 1, self.src_length))
                         # accuracy = (output == target).mean()
-                        accuracy = metrics.accuracy_score(target, prediction, zero_division=0.0)
-                        accuracies.update(accuracy, data_generator.batch_size) # accuracy.item()
+                        # accuracy = metrics.accuracy_score(target, prediction, zero_division=0.0)
+                        accuracies.update(torch.exp(-loss).cpu().detach().numpy(), data_generator.batch_size) # accuracy.item()
+                        out_freq = None
+                        if epoch % 20 == 0:
+                            prediction = []
+                            output = greedy_decode(self.model, data_generator, self.max_len, start_symbol=1, sample_num=15)
+                            for out in output:
+                                prediction+=out
+                            out_freq = torch.hstack(prediction)
                         bar.set_description(
                             f'Epoch{epoch:3d}, valid loss:{losses.avg:6f} , valid accuracy:{accuracies.avg:6f}')                        
-
-
-        if self.scheduler:
-            self.scheduler.step()
+        self.lr_scheduler.step()
         if target.ndim == 1:
             logging.info(f'Epoch{epoch:3d}, valid loss:{losses.avg:6f}, valid accuracy:{accuracies.avg:6f}')
         else:
             logging.info(f'Epoch{epoch:3d}, valid loss:{losses.avg:6f}')
-
-        return losses.avg, accuracies.avg if flag else None
+        return losses.avg, accuracies.avg, out_freq if flag else None
 
     def test_epoch(self, binary=False):
-
         accuracies = AverageMeter()
         losses = AverageMeter()
-
         self.model.eval()
         bar = tqdm(self.test_loader, ncols=100)
         outputs = []
         predicted = []
         true = []
+        accuracy = 0
         with torch.no_grad():
-            for _, dataset in enumerate(bar):
-                data, target = data.to(self.device), target.to(self.device)
+            for _, dataset in enumerate(self.test_loader):
                 data_generator = Collator(dataset, self.src_length, self.device)
                 if binary:
+                    data, target = dataset
+                    data, target = data.to(self.device), target.to(self.device)
                     output = self.model(data)
                     loss = self.criterion(output, target)
                     target = target.detach().cpu().numpy()
@@ -264,20 +353,21 @@ class Engine:
                     prediction = torch.greater_equal(output, 0.5).to(torch.float64).cpu().detach().numpy()
                     accuracy = metrics.f1_score(target, prediction, 
                                                 average='macro', zero_division=0.0)
+                    losses.update(loss.item(), data.size(0))
                 else:
                     # src_mask = Variable(torch.ones(1, 1, self.src_length))
-                    prediction = greedy_decode(self.model, data_generator, self.max_len)
-                    accuracy = metrics.precision_score(target, output, average='micro', zero_division=0.0)
-
-                outputs.append(output.detach().cpu().numpy())
-                losses.update(loss.item(), data.size(0))
-                accuracies.update(accuracy, data.size(0))
+                    prediction = greedy_decode(self.model, data_generator, self.max_len, start_symbol=1)
+                    target = [i[torch.where(i)[0]].detach().cpu().numpy() for i in data_generator.true_seq]
+                    result = eval_canonical_smiles(prediction, target)
+                    accuracy = result[0] / len(prediction)
+                # outputs += prediction
+                accuracies.update(accuracy, len(prediction))
                 bar.set_description(
                     f"test loss: {losses.avg:.5f} accuracy:{accuracies.avg:.5f}")
-                predicted += prediction.tolist()
-                true += target.tolist()
-            outputs = np.concatenate(outputs)
-        return outputs, np.array(predicted), np.array(true), accuracies.avg, losses.avg
+                predicted += prediction.tolist() if type(prediction) != list else prediction
+                true += target.tolist() if type(target) != list else target
+            # outputs = np.concatenate(outputs)
+        return outputs, predicted, true, accuracies.avg, losses.avg
 
 
 def load_net_state(net, state_dict):
@@ -294,53 +384,67 @@ def load_net_state(net, state_dict):
     return net
 
 
+def get_global_score(score):
+    score = torch.tensor(score).cuda()
+    dist.reduce(score, dst=0, op=dist.ReduceOp.SUM)  # 例：求平均/求和
+    global_score = score.item() / dist.get_world_size()
+    return global_score
+
+
 def train_model(model, save_path, ds, **kwargs):
     from torch.optim.lr_scheduler import CosineAnnealingLR
     from torch.utils.tensorboard import SummaryWriter
-    writer = SummaryWriter(log_dir = save_path)
     
-    ddp_setup(kwargs['rank'], kwargs['world_size'])
-    train_loader, val_loader = make_trainloader(
-        ds, batch_size=kwargs['batch_size'],
-        num_workers=1, train_size=kwargs['train_size'],
-        seed=42, mode=kwargs['mode'], )
+    if kwargs['rank'] == 0:
+        writer = SummaryWriter(log_dir = save_path)
+    ddp_setup(kwargs['rank'], kwargs['world_size'], kwargs['gpu_ids'])
+    train_loader, val_loader = make_trainloader(ds, batch_size=kwargs['batch_size'],
+                                                train_size=kwargs['train_size'],seed=42, mode=kwargs['mode'], )
 
-    test_loader = make_testloader(ds, ) if not kwargs['mode']=='pretrain' else None
+    test_loader = make_testloader(ds, ) if not 'pretrain' in kwargs['mode'] else None
     binary = False  #True if 'ir' in ds or 'raman' in ds else 
-    if kwargs['mode'] == 'pretrain':
+    if 'pretrain' in kwargs['mode']:
         criterion = nn.MSELoss()
     elif binary:
         criterion = torch.nn.BCELoss()
     else:
-        criterion = LabelSmoothing(size=11, padding_idx=0, 
-                                   smoothing=0.0, criterion=torch.nn.CrossEntropyLoss(reduction='none'))
+        # criterion = LabelSmoothing(padding_idx=0, 
+        #                            smoothing=0.0, 
+        criterion=torch.nn.CrossEntropyLoss(reduction='none', ignore_index=0)
+        
     optimizer = torch.optim.AdamW(
         model.parameters(), **kwargs['Adam_params'])
-    scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
-    mode = 'max' if not kwargs['mode'] == 'pretrain' else 'min'
-    es = EarlyStop(patience=kwargs['patience'], mode=mode, rank=kwargs['rank'])
+    if kwargs['checkpoint']:
+        optimizer.load_state_dict(kwargs['checkpoint']['optimizer_state'])
+        
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
+    if kwargs['checkpoint']:
+        lr_scheduler.load_state_dict(kwargs['checkpoint']['lr_scheduler_state'])
+        
+    mode = 'max' if not 'pretrain' in kwargs['mode'] else 'min'
+    es = EarlyStop(patience=kwargs['patience'], mode=mode, rank=kwargs['rank'],)
     engine = Engine(train_loader=train_loader, val_loader=val_loader,
                     test_loader=test_loader,criterion=criterion, optimizer=optimizer, 
-                    scheduler=scheduler, model=model, **kwargs)
+                    lr_scheduler=lr_scheduler, model=model, **kwargs)
     # start to train 
     for epoch in range(kwargs['epoch']):
         train_loss = engine.train_epoch(epoch, binary=binary)
-        val_loss, acc = engine.evaluate_epoch(epoch, binary=binary)
-        # _, _, _, test_acc, test_loss = engine.test_epoch(binary=binary)
-        if kwargs['mode']=='pretrain':
-            es(val_loss, model, f'{save_path}/{epoch}_vloss_{str(val_loss)[2:6]}.pth')
+        val_loss, acc, out_freq = engine.evaluate_epoch(epoch, binary=binary)
+        val_loss_global, val_acc_global, train_loss_global = get_global_score(val_loss), get_global_score(acc), get_global_score(train_loss)
+        if 'pretrain' in kwargs['mode']:
+            val_loss_global = es(val_loss_global, model, f'{save_path}/{epoch}_vloss_{str(val_loss)[2:6]}.pth', optimizer, lr_scheduler)
         elif acc:
-            es(acc, model, f'{save_path}/{epoch}_f1_{str(acc)[2:6]}.pth')
+            val_acc_global = es(acc, model, f'{save_path}/{epoch}_f1_{str(acc)[2:6]}.pth', optimizer, lr_scheduler)
         else:
             assert ValueError('not metrics')
-        if es.early_stop:
+        if es.early_stop == 1:
             break
-        writer.add_scalar("Loss/train", train_loss, epoch)
-        writer.add_scalar("Loss/val", val_loss, epoch)
-        writer.add_scalar("Accuracy/val", acc, epoch)
-        # writer.add_scalar("Loss/test", test_loss, epoch)
-        # writer.add_scalar("Accuracy/test", test_acc, epoch)
-    cleanup()
+        if kwargs['rank'] == 0:
+            writer.add_scalar("Loss/train", train_loss_global, epoch)
+            writer.add_scalar("Loss/val", val_loss_global, epoch)
+            writer.add_scalar("Accuracy/val", val_acc_global, epoch)
+            if out_freq is not None:
+                writer.add_histogram('Token Frequency/val', out_freq, epoch, bins=1)
     print(es.val_score)
 
 
@@ -348,17 +452,21 @@ def test_model(model, ds, device='cpu', verbose=True, **kwargs):
     
     test_loader = make_testloader(ds, )
     binary = False#True if 'ir' in ds or 'raman' in ds else 
-    criterion = torch.nn.BCELoss() if binary else torch.nn.CrossEntropyLoss(reduction='none')
+    criterion = torch.nn.BCELoss() if binary else torch.nn.CrossEntropyLoss(reduction='none', ignore_index=0)
     engine = Engine(test_loader=test_loader,
                     criterion=criterion, model=model, device=device, **kwargs)
     outputs, pred, true, _, _ = engine.test_epoch(binary=binary)
 
     if verbose:
         # print(metrics.classification_report(true, pred, digits=4))
-        print('Exact match rate (EMR): %.4f\n' %metrics.accuracy_score(true, pred))
+        smiles_result = eval_canonical_smiles(pred, true)
+        print('True SMILES: %.4f\n' %(smiles_result[0].item()/len(pred)))
+        print('False SMILES: %.4f\n' %(smiles_result[1].item()/len(pred)))
+        print('Invalid SMILES: %.4f\n' %(smiles_result[2].item()/len(pred)))
+        print('Token accuracy: %.4f\n' %(eval_tokens(pred, true)/len(pred)))
         # logging.info(metrics.classification_report(true, pred, digits=4))
         # logging.info(f'accuracy:{metrics.accuracy_score(true, pred):.5f}')
-        logging.info('Exact match rate (EMR): %.4f\n' %metrics.accuracy_score(true, pred))
+        # logging.info('Exact match rate (EMR): %.4f\n' %metrics.accuracy_score(true, pred))
         # logging.info('Precision: %.4f\n' %(np.count_nonzero(true==pred)/pred.shape[0]/pred.shape[1]))
     return outputs, pred, true
 
