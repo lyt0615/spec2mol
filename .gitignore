@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+checkpoints/
+datasets/
+logs/
+debug.log
+EOF
