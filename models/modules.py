@@ -13,12 +13,12 @@ class EncoderDecoder(nn.Module):
     other models.
     """
 
-    def __init__(self, encoder, decoder, src_embed, tgt_embed, generator):
+    def __init__(self, encoder, decoder, src_embed, tgt_emb, generator):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.src_embed = src_embed
-        self.tgt_embed = tgt_embed
+        self.tgt_emb = tgt_emb
         self.generator = generator
 
     def forward(self, src, tgt, src_mask, tgt_mask):
@@ -30,7 +30,7 @@ class EncoderDecoder(nn.Module):
         return self.encoder(self.src_embed(src), src_mask)
 
     def decode(self, memory, src_mask, tgt, tgt_mask):
-        return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask)
+        return self.decoder(self.tgt_emb(tgt), memory, src_mask, tgt_mask)
 
 
 class Generator(nn.Module):
@@ -291,7 +291,7 @@ def make_model(src_vocab, tgt_vocab, N=6,
         decoder=Decoder(DecoderLayer(d_model, c(attn), c(attn),
                                      c(ff), dropout), N),
         src_embed=nn.Sequential(Embeddings(d_model, src_vocab), c(position)),
-        tgt_embed=nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
+        tgt_emb=nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
         generator=Generator(d_model, tgt_vocab))
 
     # This was important from their code.

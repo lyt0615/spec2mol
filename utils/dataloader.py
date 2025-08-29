@@ -39,12 +39,12 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
     if tune:
         data = pd.read_pickle(f'datasets/{ds}/tune.pkl')
         data_x = data['spectrum'].values
-        data_y = data['label'].values
+        data_y = data['smiles'].values
 
     else:
         data = pd.read_pickle(f'datasets/{ds}/train.pkl')
         data_x = data['spectrum'].values
-        data_y = data['label'].values
+        data_y = data['smiles'].values
 
     ids = np.arange(len(data_y))
 
@@ -57,16 +57,16 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
         data_train = pd.read_pickle(f'datasets/{ds}/train.pkl')
         data_val = pd.read_pickle(f'datasets/{ds}/eval.pkl')
         train_x = data_train['spectrum'].values
-        train_y = data_train['label'].values
+        train_y = data_train['smiles'].values
         val_x = data_val['spectrum'].values
-        val_y = data_val['label'].values
+        val_y = data_val['smiles'].values
         trainset = MyDataset(train_x, train_y, transform=transform_train, )
         valset = MyDataset(val_x, val_y, transform=transform_valid, )
 
     elif train_size:
         datat = pd.read_pickle(f'datasets/{ds}/train.pkl')
         data_x = datat['spectrum'].values
-        data_y = datat['label'].values
+        data_y = datat['smiles'].values
         train_id, val_id = tts(ids, shuffle=False, train_size=train_size, random_state=seed, stratify=stratify)
         trainset = MyDataset(data_x[train_id], data_y[train_id], transform=transform_train, )
         valset = MyDataset(data_x[val_id], data_y[val_id], transform=transform_valid, )
@@ -74,7 +74,7 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
     else:
         test_data = pd.read_pickle(f'datasets/{ds}/test.pkl')
         test_x = test_data['spectrum'].values
-        test_y = test_data['label'].values
+        test_y = test_data['smiles'].values
 
         trainset = MyDataset(data_x, data_y, transform=transform_train, )
         valset = MyDataset(test_x, test_y, transform=transform_valid, )
@@ -88,7 +88,7 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
 def make_testloader(ds, batch_size=128, num_workers=0, pool_dim=256):
     data = pd.read_pickle(f'datasets/{ds}/test.pkl')
     data_x = data['spectrum'].values
-    data_y = data['label'].values
+    data_y = data['smiles'].values
 
     transform_valid = bacteria_valid_transform if ds == 'Bacteria' else valid_transform
 

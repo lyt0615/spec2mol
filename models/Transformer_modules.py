@@ -1,9 +1,7 @@
 import numpy as np
-import torch
+import torch, math, copy
 import torch.nn as nn
 import torch.nn.functional as F
-import math
-import copy
 from torch.autograd import Variable
 
 
@@ -47,21 +45,22 @@ class EncoderDecoder(nn.Module):
     other models.
     """
 
-    def __init__(self, encoder, decoder, src_embed, tgt_embed, generator, mode='train'):
+    def __init__(self, encoder, decoder, src_embed, tgt_emb, generator, mode='train'):
         super(EncoderDecoder, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.src_embed = src_embed
-        self.tgt_embed = tgt_embed
+        self.tgt_emb = tgt_emb
         self.generator = generator
         self.mode = mode
         if mode == 'pretrain_spec':
             for p in self.decoder.parameters():
                 p.requires_grad = False
-            for p in self.tgt_embed.parameters():
+            for p in self.tgt_emb.parameters():
                 p.requires_grad = False
                 
         if mode == 'pretrain_mol':
+            self.mask_token = nn.Parameter(torch.randn(self.tgt_emb[0].named_parameters()['d_model']))
             for p in self.encoder.parameters():
                 p.requires_grad = False
             for p in self.src_embed.parameters():
@@ -74,21 +73,27 @@ class EncoderDecoder(nn.Module):
     def forward(self, src=None, tgt=None, src_mask=None, tgt_mask=None):
         if self.mode == 'train' or self.mode == 'test':
             "Take in and process masked src and target sequences."
-            return self.decode(self.encode(src, src_mask), src_mask,
-                            tgt, tgt_mask)
+            return self.generator(self.decode(self.encode(src, src_mask), src_mask,
+                            tgt, tgt_mask))
         elif self.mode == 'pretrain_spec':
             return self.generator(self.encode(src, None)[:, 0])
         elif self.mode == 'pretrain_mol':
-            tgt = self.tgt_embed(tgt)
+            tgt = self.tgt_emb(tgt)
             for layer in self.decoder.layers:
-                x = layer.sublayer[0](tgt, lambda x: layer.self_attn(x, x, x, None))
+                x = layer.sublayer[0](tgt, lambda x: layer.self_attn(x, x, x, tgt_mask))
             return self.generator(x[:, 0])
         
     def encode(self, src, src_mask):
         return self.encoder(self.src_embed(src), src_mask)
 
-    def decode(self, memory, src_mask, tgt, tgt_mask):
-        return self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask)
+    def decode(self, memory, src_mask, tgt, tgt_mask, mask_token_id=4):
+        tgt = self.tgt_emb[0](tgt)
+        mask = std_mask(tgt, tgt_mask)
+        if self.mode == 'pretrain_mol': # for mask pretraining
+            mask_positions = (tgt == mask_token_id).unsqueeze(-1)  
+            tgt = torch.where(mask_positions, self.mask_token, tgt)
+        tgt = self.tgt_emb[1](tgt)
+        return self.decoder(tgt, memory, src_mask, mask)
 
 
 class SpecEncoder(nn.Module):
@@ -140,7 +145,7 @@ class Generator(nn.Module):
 
     def __init__(self, d_model, vocab):
         super(Generator, self).__init__()
-        self.proj = nn.Linear(d_model, vocab)
+        self.proj = nn.Sequential(nn.Linear(d_model, d_model), nn.Tanh(), nn.Linear(d_model, vocab))
 
     def forward(self, x):
         return self.proj(x) # F.log_softmax(self.proj(x), dim=-1)
@@ -223,7 +228,7 @@ class Decoder(nn.Module):
 
     def forward(self, x, memory, src_mask, tgt_mask):
         for layer in self.layers:
-            x = layer(x, memory, src_mask, tgt_mask)
+            x = layer(x, memory, None, tgt_mask)
         return self.norm(x)
 
 
@@ -238,7 +243,7 @@ class DecoderLayer(nn.Module):
         self.feed_forward = feed_forward
         self.sublayer = clones(SublayerConnection(size, dropout), 3)
 
-    def forward(self, x, memory, src_mask, tgt_mask):
+    def forward(self, x, memory, src_mask=None, tgt_mask=None):
         "Follow Figure 1 (right) for connections."
         m = memory
         x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
@@ -258,7 +263,10 @@ def attention(query, key, value, mask=None, dropout=None):
     d_k = query.size(-1)
     scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
     if mask is not None:
-        scores = scores.masked_fill(mask == 0, -1e9)
+        # print(scores.shape, mask.shape)
+        scores = scores.masked_fill(mask == 1, -1e9)
+        # torch.save({'mask':mask[0].cpu().detach(), 'q':query[0].cpu().detach(),
+        #             'k':key[0].cpu().detach(), 'v':value[0].cpu().detach()}, '/home/fangyikai/yanti/spec2mol/data.pt')
     p_attn = F.softmax(scores, dim=-1)
     if dropout is not None:
         p_attn = dropout(p_attn)
@@ -279,13 +287,14 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class Embeddings(nn.Module):
-    def __init__(self, d_model, vocab):
+    def __init__(self, d_model, vocab=512):
         super(Embeddings, self).__init__()
-        self.lut = nn.Embedding(vocab, d_model)
+        self.lut = nn.Embedding(vocab, d_model, 0)
         self.d_model = d_model
 
     def forward(self, x):
         return self.lut(x) * math.sqrt(self.d_model)
+
 
 class PositionalEncoding(nn.Module):
     "Implement the PE function."
@@ -346,6 +355,28 @@ class LearnableClassEmbedding(nn.Module):
             x = torch.cat((self.ce.repeat(x.size(0), 1).unsqueeze(1), x), dim=1)
         return x
     
+    
+class LearnableClassEmbedding(nn.Module):
+    "Implement the class and distillation embeddings."
+
+    def __init__(self, d_model, dropout, dist=False):
+        super(LearnableClassEmbedding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        # Create the learnable embeddings
+        self.ce = nn.Parameter(torch.randn(1, d_model))
+        self.de = nn.Parameter(torch.randn(1, d_model)) if dist else None
+
+    def forward(self, x):
+        # concatenate the class and distillation embeddings
+        if self.de is not None:
+            x = torch.cat((self.ce.repeat(x.size(0), 1).unsqueeze(1), x,
+                        self.de.repeat(x.size(0), 1).unsqueeze(1)), dim=1)
+        else:
+            x = torch.cat((self.ce.repeat(x.size(0), 1).unsqueeze(1), x), dim=1)
+        return x
+    
+    
 def make_model(src_vocab, tgt_vocab, N=6,
                d_model=512, d_ff=2048, h=8, dropout=0.1, mode='train'):
     "Helper: Construct a model from hyperparameters."
@@ -357,12 +388,10 @@ def make_model(src_vocab, tgt_vocab, N=6,
         encoder=Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
         decoder=Decoder(DecoderLayer(d_model, c(attn), c(attn),
                                      c(ff), dropout), N),
-        src_embed=nn.Sequential(Embeddings(d_model, src_vocab), c(position)),
-        tgt_embed=nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
+        src_embed=nn.Sequential(Embeddings(d_model), c(position)),
+        tgt_emb=nn.Sequential(Embeddings(d_model), c(position)),
         generator=Generator(d_model, tgt_vocab),
         mode=mode)
-    return model
-        
     # This was important from their code.
     # Initialize parameters with Glorot / fan_avg.
     for p in model.parameters():
@@ -371,18 +400,19 @@ def make_model(src_vocab, tgt_vocab, N=6,
     return model
 
 
-class Collator:
+class DataGenerator:
+    
     def __init__(self, batch, src_length, device=torch.device('cpu')):
         self.device = device
-        self.src, self.tgt, self.src_mask, self.tgt_mask, self.tgt_y, self.ntokens = [i.to(self.device) for i in self.collate(batch, src_length)]
+        self.src, self.tgt, self.tgt_mask, self.tgt_y, self.ntokens = [i.to(self.device) for i in self.collate(batch, src_length)]
         self.batch_size = self.src.size(0)
-        self.true_seq = [seq[torch.where(seq)[0][1:]] for seq in batch[1]]
-        
+        self.true_seq = [seq[torch.where(seq!=1)[0]][1:-1] for seq in self.tgt]
+        # self.padding_idx = padding_value
+        # self.tokenizer = AutoTokenizer.from_pretrained("../models/moltokenizer")
+
+
     def make_pad_mask(self, lengths: torch.Tensor, max_len: int = None):
-        """
-        lengths: [batch_size], 每个样本的实际长度
-        return: [batch_size, 1, 1, max_len] 的 bool mask，True 表示 PAD 位置
-        """
+
         # batch_size = lengths.size(0)
         max_len = lengths.max()
         # [batch, max_len]
@@ -390,8 +420,9 @@ class Collator:
         return mask.unsqueeze(1).to(self.device)
 
     def make_causal_mask(self, sz: int):
-        return torch.triu(torch.ones(sz, sz, dtype=torch.int, device=self.device), diagonal=1)
-    def collate(self, batch, src_length=None, padding_value=0):
+        return torch.triu(torch.ones(sz, sz, dtype=torch.int, device=self.device), diagonal=0)
+    
+    def collate(self, batch, src_length=None):
         if src_length is None:
             src_lengths = torch.tensor([k.shape[-1] for k in batch[0]])
         else:
@@ -399,18 +430,28 @@ class Collator:
         #     src_mask=None
         #     src = batch[0]
         # else:
-        src = torch.nn.utils.rnn.pad_sequence(batch[0], batch_first=True, padding_value=padding_value)
-        src_mask = self.make_pad_mask(src_lengths, src.size(-1))   # [B,1,1,Ls]
-        tgt = batch[1] # [:,:-1]
-        tgt_y = batch[1][:,1:]
-        ntokens = sum([(y!=padding_value).sum() for y in tgt_y])
+        src = batch[0]#torch.nn.utils.rnn.pad_sequence(batch[0], batch_first=True, padding_value=self.padding_idx)
+        #src_mask = None self.make_pad_mask(src_lengths, src.size(-1))   # [B,1,1,Ls]
+        tgt = batch[1]['input_ids']
+        tgt_y = tgt[:,1:]
+        tgt = torch.where(tgt==2, 1, tgt)#torch.vstack([t[:torch.where(t==2)[0]:] for t in tgt])
+        # print(tgt[0], tgt_y[0] )
+        tgt = tgt[:, :-1]
+        tgt_pad_mask = batch[1]['attention_mask'][:, :-1]      
+        # seq[torch.where(seq!=1)[0]][1:]
+        for i in range(len(tgt)):
+            eos_id = torch.where(tgt[i]==2)[0]
+            tgt[i][eos_id] = 1
+            tgt_pad_mask[i][eos_id] = 0
+        ntokens = sum([(y!=y[-1]).sum() for y in tgt_y])
         # tgt = torch.nn.utils.rnn.pad_sequence(tgt, batch_first=True, padding_value=padding_value)
         # tgt_y = torch.nn.utils.rnn.pad_sequence(tgt_y, batch_first=True, padding_value=padding_value)
-        tgt_lengths = torch.tensor([j.shape[-1] for j in tgt])
-        tgt_pad_mask = self.make_pad_mask(tgt_lengths, tgt.size(-1))  # [B,1,1,Lt]
-        causal_mask = self.make_causal_mask(tgt.size(1))  # [Lt,Lt]
-        tgt_mask = tgt_pad_mask | causal_mask #tgt_pad_mask  .unsqueeze(0).unsqueeze(0)
-        return src, tgt, src_mask, tgt_mask, tgt_y, ntokens
+        # tgt_lengths = torch.tensor([j.shape[-1] for j in tgt])
+        # tgt_pad_mask = self.make_pad_mask(tgt_lengths, tgt.size(-1))  # [B,1,1,Lt]
+        # causal_mask = self.make_causal_mask(tgt.size(1))  # [Lt,Lt]
+        # tgt_mask = tgt_pad_mask | causal_mask #tgt_pad_mask  .unsqueeze(0).unsqueeze(0)
+        return src, tgt, tgt_pad_mask, tgt_y, ntokens
+    
     
 class Batch:
     "Object for holding a batch of data with mask during training."
@@ -432,12 +473,14 @@ class Batch:
             subsequent_mask(tgt.size(-1)).type_as(tgt_mask.data))
         return tgt_mask
 
-def run_epoch(data_iter, model, loss_compute):
+
+def run_epoch(data_iter, model, criterion):
     "Standard Training and Logging Function"
+    if type(model) == torch.nn.parallel.DistributedDataParallel:
+        model = model.module 
     # start = time.time()
     total_tokens = 0
     total_loss = 0
-    tokens = 0
     # t = (data_iter.src, data_iter.tgt,
                         # data_iter.src_mask, data_iter.tgt_mask)
     # for i in range(3):
@@ -445,25 +488,26 @@ def run_epoch(data_iter, model, loss_compute):
     #     except AttributeError:print('***',i)
     # for i, batch in enumerate(data_iter):
     out = model.forward(data_iter.src, data_iter.tgt,
-                        data_iter.src_mask, data_iter.tgt_mask)
-    out = F.softmax(out, dim=-1)
-    out = model.module.generator(out)
+                        None, data_iter.tgt_mask)
+    # out = model.generator(out)
+    # out = F.softmax(out, dim=-1)
     # shift_logits = out[:, :-1, :].contiguous().view(-1, 24)
     # shift_labels = data_iter.tgt[:, 1:].contiguous().view(-1)
     # print('shift_labels[:10] =', shift_labels[:10].tolist())
     # print('shift_logits[0, eos] =', shift_logits[0, 23].item())
     # print('generator.bias[eos] =', model.module.generator.proj.bias[23].item())
-    # print('generator.bias.mean() =', model.module.generator.proj.bias.mean().item())    
-    loss = loss_compute(out, data_iter.tgt_y, data_iter.ntokens)
-    total_loss += loss
-    total_tokens += data_iter.ntokens
+    # print('generator.bias.mean() =', model.module.generator.proj.bias.mean().item())   
+    loss = criterion(out.contiguous().view(-1, out.size(-1)),
+                              data_iter.tgt_y.contiguous().view(-1)).sum() / data_iter.ntokens
+    # total_loss += loss
+    # total_tokens += data_iter.ntokens
     # if i % 50 == 1:
     #     elapsed = time.time() - start
     #     print("Epoch Step: %d Loss: %f Tokens per Sec: %f" %
     #             (i, loss / data_iter.ntokens, tokens / elapsed))
     #     start = time.time()
     #     tokens = 0
-    return out, total_loss / total_tokens
+    return out, loss
 
 
 global max_src_in_batch, max_tgt_in_batch
@@ -519,19 +563,19 @@ def get_std_opt(model):
 class LabelSmoothing(nn.Module):
     "Implement label smoothing."
 
-    def __init__(self, padding_idx, criterion, smoothing=0.0):
+    def __init__(self, size, padding_idx, criterion, smoothing=0.0):
         super(LabelSmoothing, self).__init__()
         self.criterion = criterion  #nn.KLDivLoss(reduction='sum')
         self.padding_idx = padding_idx
         self.confidence = 1.0 - smoothing
         self.smoothing = smoothing
-        # self.size = size
+        self.size = size
         self.true_dist = None
 
     def forward(self, x, target):
         # assert x.size(1) == self.size
         true_dist = x.data.clone()
-        true_dist.fill_(self.smoothing)
+        true_dist.fill_(self.smoothing / (self.size - 2))
         true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
         true_dist[:, self.padding_idx] = 0
         mask = torch.nonzero(target.data == self.padding_idx)
@@ -559,7 +603,8 @@ class LossCompute:
         self.opt = opt
 
     def __call__(self, x, y, norm):
-        loss = self.criterion(x[:, :-1, :].contiguous().view(-1, x.size(-1)),
+        print(x.contiguous().view(-1, x.size(-1)).shape, y.contiguous().view(-1).shape)
+        loss = self.criterion(x.contiguous().view(-1, x.size(-1)),
                               y.contiguous().view(-1)).sum() / norm
         if self.opt is not None:
             self.opt.step()
@@ -567,39 +612,55 @@ class LossCompute:
         return loss * norm
 
 
-def greedy_decode(model, data_generator, max_len, start_symbol=0, sample_num=None):
-    import pandas as pd
+def std_mask(tgt, attn_mask):
+    seq_len = tgt.shape[-2]
+        # attn_mask = attn_mask.unsqueeze(1).expand(-1, seq_len, -1)
+    causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.int), diagonal=0).cuda()
+    if attn_mask is not None:
+        pad_mask = attn_mask.unsqueeze(-1)==0
+        std_mask = causal_mask & pad_mask.logical_not()
+    else:
+        std_mask = causal_mask
+    return std_mask
+
+
+def greedy_decode(model, data_generator, src_length, max_len, start_symbol=0, sample_num=None):
     if type(model) == torch.nn.parallel.DistributedDataParallel:
         model = model.module 
     predlist = []
-    eos = data_generator.tgt_y.max()
     # lengths = [len(seq) for seq in data_generator.true_seq]
     # print('mean', np.mean(lengths), 'max', np.max(lengths), 'pct 90', np.percentile(lengths, 90))
     sample_num = sample_num if sample_num else len(data_generator.src)
+    l = []
     for i in range(sample_num):
-        src, src_mask = data_generator.src[i].unsqueeze(0), Variable(torch.ones(1, 1, 128)).to(data_generator.device)
-        ys = torch.ones(1, 1, device=src.device, dtype=torch.long).fill_(start_symbol)
-        memory = model.encode(src, Variable(src_mask))
+        src, src_mask = data_generator.src[i].unsqueeze(0), Variable(torch.ones(1, 1, src_length)).cuda()
+        # tgt_mask = data_generator.tgt_mask[i].unsqueeze(0)
+        ys = torch.ones(1, 1, device=src.device).fill_(start_symbol).type_as(data_generator.tgt.data)
+        memory = model.encode(src, src_mask)
         for step in range(max_len):
-            tgt_mask = Variable(subsequent_mask(step+1).type_as(data_generator.tgt_mask))
+            # subsequent_mask = np.triu(np.ones(ys.size(1)), k=1).astype('uint8')
+            # tgt_mask = torch.from_numpy(subsequent_mask) == 1
+            # print(ys)
+            # tgt_mask = tgt_mask.to(src.device)
+            tgt_mask = torch.ones_like(ys, device=ys.device) #Variable(subsequent_mask(step+1).type_as(data_generator.tgt_mask))
             out = model.decode(memory, src_mask,
                             Variable(ys),
-                            tgt_mask)
-            prob = F.softmax(model.generator(out[:, -1]), dim=-1)
+                            Variable(tgt_mask))
+            logits = model.generator(out[:, -1])
+            l.append(logits)
+            prob = F.softmax(logits, dim=-1)
             _, next_word = torch.max(prob, dim=-1)
             next_word = next_word.data[0]
             # ys[:, i+1] = next_word
-            ys = torch.cat([ys, torch.ones(1, 1).fill_(next_word).type_as(data_generator.tgt)], dim=1)
     #         print(f"mask shape={tgt_mask.shape} | "
     #   f"logits[:5]={prob[0,:5].tolist()} {prob.topk(5).indices.tolist()}| "
     #   f"chosen={next_word.item()} prob={prob[0,next_word.item()].item():.3f}")
-            if next_word == eos:
+            if next_word == 2:
                 break
-
-        predlist.append(ys)
+            ys = torch.cat([ys, torch.ones(1, 1).fill_(next_word).type_as(data_generator.tgt)], dim=1)
+        predlist.append(ys[0][0:])
+    # torch.save(l, '/home/fangyikai/yanti/spec2mol/logits.pt')
         # print(ys)
-    # pd.to_pickle([data_generator.src, data_generator.src_mask, data_generator.tgt,
-    #         data_generator.tgt_mask, prob],'data.pkl')
     return predlist
 
 
@@ -639,4 +700,4 @@ if __name__ == "__main__":
     model.eval()
     src = Variable(torch.LongTensor([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]))
     src_mask = Variable(torch.ones(1, 1, 10))
-    print(greedy_decode(model, src, src_mask, max_len=10, start_symbol=1))
+    print(greedy_decode(model, src, src_mask, max_len=10, ))

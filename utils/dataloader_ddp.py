@@ -1,14 +1,13 @@
 import numpy as np
 import torch
 import pandas as pd
-
-from utils.transform import ToFloatTensor, bacteria_train_transform, bacteria_valid_transform
 from torch.utils.data import Dataset, DataLoader, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 from sklearn.model_selection import train_test_split as tts
 from torchvision import transforms
 import torch.nn.functional as F
 from functools import lru_cache
+from transformers import AutoTokenizer
 
 # train_transform = transforms.Compose([torch.nn.Identity()])#ToFloatTensor()
 # valid_transform = transforms.Compose([torch.nn.Identity()])#ToFloatTensor()
@@ -20,7 +19,7 @@ class MyDataset(Dataset):
         X = self.stack(X)
         y = self.stack(y)
         self.data = X
-        self.label = self.to_label(y)
+        self.label = y #self.to_label(y)
         self.transform = transform
         self.pool_dim = pool_dim
         self.cache_size = cache_size
@@ -49,7 +48,7 @@ class MyDataset(Dataset):
         try:
             return torch.FloatTensor(np.vstack(input))
         except:
-            return [torch.LongTensor(i) for i in input]
+            return input
         
     def to_label(self, input):
         if not type(input) == list:
@@ -59,10 +58,11 @@ class MyDataset(Dataset):
 
 
 def collate_fn(batch):
+    tokenizer = AutoTokenizer.from_pretrained("models/moltokenizer")
     x = [item[0] for item in batch]
-    x = torch.nn.utils.rnn.pad_sequence(x, batch_first=True, padding_value=0).unsqueeze(1)
+    x = torch.nn.utils.rnn.pad_sequence(x, batch_first=True, padding_value=1).unsqueeze(1)
     y = [item[1] for item in batch]
-    y = torch.nn.utils.rnn.pad_sequence(y, batch_first=True, padding_value=0)
+    y = tokenizer(y, padding=True, truncation=True, return_tensors="pt")
     return x, y
     
     
@@ -71,7 +71,7 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
     data = pd.read_pickle(f'datasets/{ds}/{mode}.pkl')
     data_x = data['spectrum']
     if not 'pretrain' in mode:
-        data_y = data['label'].values
+        data_y = data['smiles'].values
     else:
         pass
     # else: raise ValueError("Argument 'STRATEGY['mode'] should be chhosen among ""train, pretrain, test and tune"".")
@@ -85,9 +85,9 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
             data_train = pd.read_pickle(f'datasets/{ds}/train.pkl')
             data_val = pd.read_pickle(f'datasets/{ds}/eval.pkl')
             train_x = data_train['spectrum'].values
-            train_y = data_train['label'].values
+            train_y = data_train['smiles'].values
             val_x = data_val['spectrum'].values
-            val_y = data_val['label'].values
+            val_y = data_val['smiles'].values
             trainset = MyDataset(train_x, train_y)
             valset = MyDataset(val_x, val_y)
         else:
@@ -95,7 +95,7 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
             data_x = data['spectrum'].values
             train_id, val_id = tts(ids, shuffle=False, train_size=train_size, random_state=seed, stratify=stratify)
             if mode == 'train':
-                data_y = data['label'].values
+                data_y = data['smiles'].values
                 trainset = MyDataset(data_x[train_id], data_y[train_id])
                 valset = MyDataset(data_x[val_id], data_y[val_id])
             else: 
@@ -105,7 +105,7 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
     if mode == 'test':
         test_data = pd.read_pickle(f'datasets/{ds}/test.pkl')
         test_x = test_data['spectrum'].values
-        test_y = test_data['label'].values
+        test_y = test_data['smiles'].values
         trainset = MyDataset(data_x, data_y)
         valset = MyDataset(test_x, test_y)
     collate_func = collate_fn if mode == 'train' else None
@@ -119,7 +119,7 @@ def make_trainloader(ds, batch_size=16, num_workers=0, train_size=0.8, seed=42, 
 def make_testloader(ds, batch_size=128, num_workers=0, pool_dim=256, collate=True):
     data = pd.read_pickle(f'datasets/{ds}/test.pkl')
     data_x = data['spectrum'].values
-    data_y = data['label'].values
+    data_y = data['smiles'].values
     # transform_valid = bacteria_valid_transform if ds == 'Bacteria' else valid_transform
     collate_func = collate_fn if collate else None
     testset = MyDataset(data_x, data_y)

@@ -2,13 +2,12 @@ import sys
 sys.path.append('/data/YantiLiu/projects/substructure-ID/datasets')
 
 try: 
-    from Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, LearnablePositionalEncoding, NoamOpt, run_epoch, Variable, LossCompute, greedy_decode, LabelSmoothing, Collator, PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
+    from Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, LearnablePositionalEncoding, NoamOpt, run_epoch, Variable,  greedy_decode, LabelSmoothing, DataGenerator, LearnableClassEmbedding, PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
 except ModuleNotFoundError:
-    from models.Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, LearnablePositionalEncoding, NoamOpt, run_epoch, Variable, LossCompute, greedy_decode, LabelSmoothing, Collator, PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
+    from models.Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, LearnablePositionalEncoding, NoamOpt, run_epoch, Variable,  greedy_decode, LabelSmoothing, DataGenerator, LearnableClassEmbedding, PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
 import torch
 import torch.nn as nn
 import numpy as np
-
 
 
 class SpectralEncoding(nn.Module):
@@ -103,23 +102,29 @@ class FPGrowingModule(nn.Module):
         return output_preds
     
     
-def make_model(tgt_vocab, src_vocab=1024, N=6, d_model=512, d_ff=2048, h=8, dropout=0.1, mode='train'):
+def make_model(tgt_vocab, src_vocab=1024, N=6, d_model=512, d_ff=1024, h=8, dropout=0.1, mode='train'):
     import copy
     "Helper: Construct a model from hyperparameters."
     spec_encoding = SpectralEncoding(d_model, 8, LayerNorm)
-    src_length = spec_encoding(torch.randn([1,1,src_vocab])).shape[-2]
-    spec_pos_encoding = LearnablePositionalEncoding(
-        d_model, dropout)
+    position = PositionalEncoding(d_model, dropout)
+    # spec_pos_embedding = PositionalEncoding(d_model, dropout)
+    # spec_cls_embedding = LearnableClassEmbedding(d_model, dropout)
+    src_length = position(spec_encoding(torch.randn([1,1,src_vocab]))).shape[-2]
     c = copy.deepcopy
+    # mol_cls_embedding = c(spec_cls_embedding)
+    
+    src_embed=nn.Sequential(spec_encoding, c(position))
+    tgt_emb = nn.ModuleList([Embeddings(d_model), c(position)])
+    
     attn = MultiHeadedAttention(h, d_model)
     ff = PositionwiseFeedForward(d_model, d_ff, dropout)
-    position = PositionalEncoding(d_model, dropout)
+    
     model = EncoderDecoder(
         encoder=Encoder(EncoderLayer(d_model, c(attn), c(ff), dropout), N),
         decoder=Decoder(DecoderLayer(d_model, c(attn), c(attn),
                                      c(ff), dropout), N),
-        src_embed=nn.Sequential(spec_encoding, spec_pos_encoding),
-        tgt_embed=nn.Sequential(Embeddings(d_model, tgt_vocab), c(position)),
+        src_embed=src_embed,
+        tgt_emb=tgt_emb,
         generator=Generator(d_model, tgt_vocab),
         mode=mode)
     # if mode =='pretrain_spec':
@@ -138,25 +143,26 @@ def make_model(tgt_vocab, src_vocab=1024, N=6, d_model=512, d_ff=2048, h=8, drop
 if __name__ == "__main__":
     # from thop import profile
     x = torch.rand(3, 1, 1024)
-    a = torch.tensor([1, 2, 3,4,5])        
-    b = torch.tensor([4, 5,6,8,0])           
-    c = torch.tensor([9,10,0,0,0])              
+    a = torch.tensor([1, 8, 3,4,5, 2])        
+    b = torch.tensor([1,4, 6,8,2,0])           
+    c = torch.tensor([1,10,2,0,0,0])              
     y = torch.vstack([a,b,c])
-    model, src_length = make_model(1024, 11, mode='pretrain_mol')
-    data_generator = Collator([x, y], src_length, torch.device('cpu'))
-    src, tgt, src_mask, tgt_mask = data_generator.src, data_generator.tgt, data_generator.src_mask, data_generator.tgt_mask
-    y = model(src, tgt, src_mask, tgt_mask)
-    criterion = LabelSmoothing(size=11, padding_idx=0, smoothing=0.0)
+    model, src_length = make_model(11, 1024, mode='pretrain_spec')
+    data_generator = DataGenerator([x, y], src_length, torch.device('cpu'))
+    src, tgt, src_mask, tgt_mask = data_generator.src, data_generator.tgt, None, data_generator.tgt_mask
+    # y = model(src, tgt, src_mask, tgt_mask)
+    criterion = nn.CrossEntropyLoss(reduction='none', ignore_index=1)
+    # criterion = LabelSmoothing(size=11, padding_idx=0, smoothing=0.0)
     model_opt = NoamOpt(model.src_embed[0].d_model, 1, 400,
                         torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
 
     for epoch in range(10):
         model.train()
         run_epoch(data_generator, model,
-                    LossCompute(model.generator, criterion, model_opt))
+                    criterion)
         model.eval()
         print(run_epoch(data_generator, model,
-                        LossCompute(model.generator, criterion, None)))
+                       criterion))
 
     model.eval()
     src = torch.randn(1,1,1024)
