@@ -15,7 +15,7 @@ NET = {'conv_ksize':3,
 
 STRATEGY = {
     'train': {
-        "batch_size": 64,
+        "batch_size": 8,
         "epoch": 1000,
         "patience": 200,
         'train_size': None,

@@ -20,6 +20,7 @@ class SpectralEncoding(nn.Module):
 
     def forward(self, x):
         # try:
+        print(x.shape)
         x = self.encoding(x).transpose(1, 2)  # B, C, L -> B, L, C
         # except RuntimeError:print(x.shape)
         return self.norm(x)

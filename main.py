@@ -133,7 +133,7 @@ def main(rank=None, world_size=1, gpu_ids=None):
 
     elif net_ == 'Transformer':
         from models.Transformer import make_model
-        N, d_model, h = args.depth, args.d_model, args.n_heads
+        N, d_model, h = int(args.depth), int(args.d_model), int(args.n_heads)
         net, src_length = make_model(tgt_vocab, N=N, d_model=d_model, h=h, mode=mode)
         params['strategy']['src_length'] = src_length
         params['strategy']['max_len'] = args.max_len
