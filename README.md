@@ -4,9 +4,9 @@
 ## Dataset
 1. Experimental Raman & IR of small organic molecules
   - 130 k+ IR spectra
-    [](!image/ir_exp.png)
+    ![](image/ir_exp.png)
   - 12 k+ Raman spectra
-    [](!image/raman_exp.png)
+    ![](image/raman_exp.png)
 
 ## Model
 - Vanilla Transformer with encoder-decoder architecture for auto-regression
