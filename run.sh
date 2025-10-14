@@ -1,5 +1,5 @@
 # !/bin/bash
-/home/lyt/anaconda3/envs/raman/bin/python /home/lyt/projects/spec2mol/main.py \
+python /home/lyt/projects/spec2mol/main.py \
  --net Transformer \
  --mode test \
  --ds ir2mol \
