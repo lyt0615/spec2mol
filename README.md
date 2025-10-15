@@ -1,5 +1,5 @@
 # Spectrum-SMILES Translation Language Model
-  - This repo aims at testifying **experimental spectra** for spectrum-SMILES translation, despite most publications focusing only on simulated spectrum, and limited heavy atom types.
+This repo aims at testifying **experimental spectra** for spectrum-SMILES translation, despite most publications focusing only on simulated spectrum, and limited heavy atom types.
 
 ## Dataset
 Experimental spectra of small organic molecules
