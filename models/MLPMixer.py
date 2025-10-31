@@ -273,7 +273,7 @@ def inf_time(model, device='cpu'):
 
 if __name__ == "__main__":
     import time
-    from thop import profile
+    # from thop import profile
     p = []
     t = []
 #     for d in [0, 4,
@@ -310,10 +310,10 @@ if __name__ == "__main__":
             net = resnet(**params)
             input = torch.randn(16, 1, 1024)
             net(input)
-            flops, params = profile(net, inputs=(input, ))
+            # flops, params = profile(net, inputs=(input, ))
             # sum_p+=params
             # sum_t = inf_time(net, 'cuda:3')/2
-        p.append(params/1000**2)
+        # p.append(params/1000**2)
             # t.append(sum_t)
 # print('FLOPs = ' + str(flops/1000**3) + 'G')
 # print('Params = ' + str(params/1000**2) + 'M')
@@ -323,9 +323,9 @@ if __name__ == "__main__":
 
 
 
-# from torch.utils.tensorboard import SummaryWriter
-# tb_writer = SummaryWriter(log_dir = 'checkpoints/qm9s_raman/Res_SE/net')
-# tb_writer.add_graph(net, (input)) 
+from torch.utils.tensorboard import SummaryWriter
+tb_writer = SummaryWriter(log_dir = 'checkpoints/qm9s_raman/Res_SE/net')
+tb_writer.add_graph(net, (input)) 
 
 # depth=6: 
 # p = [2.111885, 2.929565, 3.747245, 4.564925, 5.382605, 6.200285] 

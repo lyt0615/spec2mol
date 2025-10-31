@@ -9,6 +9,7 @@ import torch.distributed as dist
 from torch.autograd import Variable
 from models.Transformer_modules import run_epoch, DataGenerator
 from rdkit import Chem, RDLogger
+from sklearn.metrics import accuracy_score
 RDLogger.DisableLog('rdApp.*')
 
 import torch.nn.functional as F
@@ -16,18 +17,18 @@ from functools import partial
 import json
 
 
-def get_smiles(label):
+def get_seq(label):
     with open("models/moltokenizer/vocab.json",'r',encoding='utf-8') as f:
         tokens = {val: key for key, val in json.load(f).items()}
-    smiles = ''
+    seq = ''
     if type(label) == torch.Tensor: label = label.cpu().detach() 
     for l in label:
-        smiles += tokens[l.data.item()]
-    smiles = smiles.replace('</s>', '')
-    smiles = smiles.replace('<s>', '')
-    smiles = smiles.replace('<unk>', '')
-    smiles = smiles.replace('<pad>', '')
-    return smiles
+        seq += tokens[l.data.item()]
+    seq = seq.replace('</s>', '')
+    seq = seq.replace('<s>', '')
+    seq = seq.replace('<unk>', '')
+    seq = seq.replace('<pad>', '')
+    return seq
 
 
 def write(x, path):
@@ -58,11 +59,11 @@ def eval_canonical_smiles(pred, target):
 def top_k_eval(pred, target, k):
     if not len(pred)==k:print(len(pred),k)
     assert len(pred) == k
-    true_dict = np.zeros(k)
-    true_dict+=np.array([get_smiles(p)==get_smiles(target) for p in pred])
+    true = np.zeros(k)
+    true+=np.array([get_seq(p)==get_seq(target) for p in pred])
     # for i in range(1, k):
     #     true_dict[i] += true_dict[i-1]
-    return true_dict
+    return true
 
 
 def eval_tokens(prediction, target):
@@ -76,6 +77,22 @@ def eval_tokens(prediction, target):
     return true
 
 
+def eval_smarts_seq(prediction, target, target_smiles):
+    result_dict = {'token':eval_tokens(prediction, target),
+                   'seq':np.sum([i==j for i,j in zip(target,prediction)]),
+                   'diversity':0}
+    for (p, t, smiles) in zip(prediction, target, target_smiles):
+        p_smarts = p.split('<d>')
+        t_smarts = t.split('<d>')
+        target_mol = Chem.MolFromSmiles(smiles)
+        for smarts in p_smarts:
+            if smarts not in t_smarts:
+                try:
+                    result_dict['diversity'] += int(target_mol.HasSubstructMatch(Chem.MolFromSmarts(smarts)))
+                except: pass
+        return result_dict
+        
+    
 def ddp_setup(rank: int, world_size: int, gpu_ids: str):
     """
     Args:
@@ -224,6 +241,9 @@ class Engine:
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
         self.eval_sample_num = eval_sample_num
+        self.to_smarts = kwargs['to_smarts']
+        if self.to_smarts:
+            kwargs['greedy_decode']['max_len'] = 100
         self.kwargs = kwargs
         # if nn.BatchNorm1d in list(model.modules()):
         #     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model) 
@@ -264,13 +284,15 @@ class Engine:
             if self.rank == 0:
                 bar.set_description(
                     f'Epoch{epoch:3d}, train loss:{losses.avg:6f}')
-        logging.info(f'Epoch{epoch:3d}, train loss:{losses.avg:6f}')
+                
+        if self.rank == 0: logging.info(f'Epoch{epoch:3d}, train loss:{losses.avg:6f}')
         return losses.avg
 
     def evaluate_epoch(self, epoch, binary=False):
         token_accs = AverageMeter()
-        smiles_accs = AverageMeter()
+        seq_accs = AverageMeter()
         losses = AverageMeter()
+        diversity = AverageMeter() if self.to_smarts else None
         flag = True
         self.model.eval()
         bar = tqdm(self.val_loader, ncols=125) if self.rank == 0 else self.val_loader
@@ -303,14 +325,23 @@ class Engine:
                         output = self.greedy_decode(data_generator, **self.kwargs['greedy_decode'])
                         for out in output:
                             prediction+=out
-                        target = data_generator.true_seq#[:self.eval_sample_num]
-                        token_acc = eval_tokens(output, target) / np.sum([len(i) for i in target])
-                        smiles_acc = eval_canonical_smiles([get_smiles(o) for o in output], [get_smiles(t) for t in target]) / len(target)
-                        token_accs.update(token_acc, len(target)) # accuracy.item()
-                        smiles_accs.update(smiles_acc, len(target))
+                        
+                        if self.to_smarts:
+                            target = [get_seq(t) for t in data_generator.true_seq]
+                            result_dict = eval_smarts_seq(output, target, data_generator.smiles)
+                            token_acc = result_dict['token'] / np.sum([len(i) for i in target])
+                            seq_acc = result_dict['seq'] / data_generator.batch_size
+                            div = result_dict['diversity'] / data_generator.batch_size
+                            diversity.update(div, data_generator.batch_size)
+                        else:
+                            token_acc = eval_tokens(output, target) / np.sum([len(i) for i in target])
+                            seq_acc = eval_canonical_smiles(output, target) / data_generator.batch_size
+                            target = data_generator.smiles
+                        token_accs.update(token_acc, data_generator.batch_size) # accuracy.item()
+                        seq_accs.update(seq_acc, data_generator.batch_size)
                         if self.rank==0:
-                            bar.set_description(f'Epoch{epoch:3d}, eval loss:{losses.avg:6f} , token accuracy:{token_accs.avg:6f}, smiles accuracy:{smiles_accs.avg:6f}')  
-                            logging.info(f'Epoch{epoch:3d}, eval loss:{losses.avg:6f} , token accuracy:{token_accs.avg:6f}, SMILES accuracy:{smiles_accs.avg:6f}')
+                            bar.set_description(f'Epoch{epoch:3d}, eval loss:{losses.avg:6f} , token accuracy:{token_accs.avg:6f}, sequence accuracy:{seq_accs.avg:6f}')  
+                            logging.info(f'Epoch{epoch:3d}, eval loss:{losses.avg:6f} , token accuracy:{token_accs.avg:6f}, sequence accuracy:{seq_accs.avg:6f}')
                     else:
                         if self.rank==0:
                             bar.set_description(
@@ -320,7 +351,7 @@ class Engine:
         #     logging.info(f'Epoch{epoch:3d}, eval loss:{losses.avg:6f}, eval accuracy:{token_accs.avg:6f}')
         # else:
         #     logging.info(f'Epoch{epoch:3d}, eval loss:{losses.avg:6f}')
-        return losses.avg, smiles_accs.avg, prediction if flag else None
+        return losses.avg, seq_accs.avg, diversity.avg if flag else None
 
     def test_epoch(self, binary=False):
         token_accs = AverageMeter()
@@ -347,7 +378,7 @@ class Engine:
                     losses.update(loss.item(), data.size(0))
                 else:
                     prediction = self.greedy_decode(data_generator, **self.kwargs['greedy_decode'])
-                    target = [get_smiles(t) for t in data_generator.tgt_y]
+                    target = [get_seq(t) for t in data_generator.tgt_y]
                     result = eval_canonical_smiles(prediction, target)
                     accuracy = result / len(prediction)
                 token_accs.update(accuracy, len(prediction))
@@ -357,16 +388,13 @@ class Engine:
                 true += target.tolist() if type(target) != list else target
         return outputs, predicted, true, token_accs.avg, losses.avg
 
-
+    
     def greedy_decode(self, data_generator, bos=0, eos=2, max_len=30, repetition_penalty=None):
-        print(repetition_penalty)
         if type(self.model) == torch.nn.parallel.DistributedDataParallel:
             model = self.model.module
         else:
             model = self.model 
         predlist = []
-        # spec = torch.FloatTensor(spec[::-1].copy())
-        # spec = spec.reshape(1, 1, spec.shape[-1]) if spec.dim() != 3 else spec
         for i in range(len(data_generator.src)):
             src, src_mask = data_generator.src[i].unsqueeze(0), Variable(torch.ones(1, 1, data_generator.src_length, device=data_generator.device))
             ys = torch.ones(1, 1, device=data_generator.device, dtype=torch.long).fill_(bos)
@@ -397,7 +425,7 @@ class Engine:
                     ys = torch.cat([ys, torch.ones(1, 1, dtype=torch.long, device=data_generator.device).fill_(eos)], dim=1)
                     predlist.append(ys[0][1:])
                     break
-        return [get_smiles(y) for y in predlist]
+        return [get_seq(y) for y in predlist]
 
 
 def load_net_state(net, state_dict):
@@ -421,25 +449,34 @@ def load_optm_state(optimizer, state_dict):
             
 
 def get_global_score(score):
-    score = torch.tensor(score).cuda()
-    dist.reduce(score, dst=0, op=dist.ReduceOp.SUM)  # 例：求平均/求和
-    global_score = score.item() / dist.get_world_size()
+    if score is not None:
+        score = torch.tensor(score).cuda()
+        dist.reduce(score, dst=0, op=dist.ReduceOp.SUM)  # 例：求平均/求和
+        global_score = score.item() / dist.get_world_size()
+    else:
+        global_score = None
     return global_score
 
 
-def train_model(model, save_path, ds, **kwargs):
+def train_model(model, save_path, ds, pretrain, **kwargs):
     from torch.optim.lr_scheduler import CosineAnnealingLR
     from torch.utils.tensorboard import SummaryWriter
     
     if kwargs['rank'] == 0:
         writer = SummaryWriter(log_dir = save_path)
     ddp_setup(kwargs['rank'], kwargs['world_size'], kwargs['gpu_ids'])
+    # mode = kwargs['mode']
+    # kwargs = kwargs['train']
+    if kwargs['rank'] == 0 and kwargs['to_smarts']:
+        print('Generating SMARTS from SMILES...')
+        
     train_loader, val_loader = make_trainloader(ds, batch_size=kwargs['batch_size'],
-                                                train_size=kwargs['train_size'],seed=42, mode=kwargs['mode'], )
-
+                                                train_size=kwargs['train_size'], seed=42,
+                                                mode='train' if not pretrain else 'pretrain', 
+                                                to_smarts=kwargs['to_smarts'])
     # test_loader = make_testloader(ds, ) if not 'pretrain' in kwargs['mode'] else None
     binary = False  #True if 'ir' in ds or 'raman' in ds else 
-    if 'pretrain' in kwargs['mode']:
+    if pretrain:
         criterion = nn.MSELoss()
     elif binary:
         criterion = torch.nn.BCELoss()
@@ -457,7 +494,7 @@ def train_model(model, save_path, ds, **kwargs):
     if kwargs['checkpoint']:
         lr_scheduler.load_state_dict(kwargs['checkpoint']['lr_scheduler_state'])
         
-    mode = 'max' if not 'pretrain' in kwargs['mode'] else 'min'
+    mode = 'max' if not pretrain else 'min'
     es = EarlyStop(patience=kwargs['patience'], mode=mode, rank=kwargs['rank'],)
     engine = Engine(train_loader=train_loader, val_loader=val_loader, 
                     criterion=criterion, optimizer=optimizer, lr_scheduler=lr_scheduler, model=model, **kwargs)
@@ -465,9 +502,9 @@ def train_model(model, save_path, ds, **kwargs):
     for epoch in range(kwargs['epoch']):
         dist.barrier()
         train_loss = engine.train_epoch(epoch, binary=binary)
-        val_loss, acc, seq_pred = engine.evaluate_epoch(epoch, binary=binary)
-        val_loss_global, val_acc_global, train_loss_global = get_global_score(val_loss), get_global_score(acc), get_global_score(train_loss)
-        if 'pretrain' in kwargs['mode']:
+        val_loss, acc, diversity = engine.evaluate_epoch(epoch, binary=binary)
+        val_loss_global, val_acc_global, train_loss_global, div_global = get_global_score(val_loss), get_global_score(acc), get_global_score(train_loss), get_global_score(diversity)
+        if pretrain:
             es(val_loss_global, f'{save_path}/{epoch}_vloss_{str(val_loss)[2:6]}.pth', model, optimizer, lr_scheduler)
         elif acc is not None:
             es(acc, f'{save_path}/{epoch}_acc_{str(acc)[2:6]}.pth', model, optimizer, lr_scheduler)
@@ -479,8 +516,8 @@ def train_model(model, save_path, ds, **kwargs):
             writer.add_scalar("Loss/val", val_loss_global, epoch)
             if val_acc_global:
                 writer.add_scalar("Accuracy/val", val_acc_global, epoch)
-            if seq_pred:
-                writer.add_histogram('Token Frequency/val', torch.stack(seq_pred), epoch, bins=1)
+            if div_global:
+                writer.add_scalar('Substructure diversity/val', div_global, epoch)
         if es.early_stop == 1:
             break
         dist.barrier()
@@ -489,7 +526,7 @@ def train_model(model, save_path, ds, **kwargs):
 
 def test_model(model, ds, device='cpu', verbose=True, **kwargs):
     
-    test_loader = make_testloader(ds)
+    test_loader = make_testloader(ds, to_smarts=kwargs['to_smarts'])
     binary = False#True if 'ir' in ds or 'raman' in ds else 
     criterion = torch.nn.BCELoss() if binary else partial(F.cross_entropy, ignore_index=1, reduction='none')
     engine = Engine(test_loader=test_loader,
@@ -497,17 +534,9 @@ def test_model(model, ds, device='cpu', verbose=True, **kwargs):
     outputs, pred, true, _, _ = engine.test_epoch(binary=binary)
 
     if verbose:
-        # print(metrics.classification_report(true, pred, digits=4))
         smiles_result = eval_canonical_smiles(pred, true)
         print('Recall: %.4f\n' %(smiles_result/len(pred)))
         logging.info('Recall: %.4f\n' %(smiles_result/len(pred)))
-        # print('False SMILES: %.4f\n' %(smiles_result[1].item()/len(pred)))
-        # print('Invalid SMILES: %.4f\n' %(smiles_result[2].item()/len(pred)))
-        # print('Token accuracy: %.4f\n' %(eval_tokens(pred, true)/len(pred)))
-        # logging.info(metrics.classification_report(true, pred, digits=4))
-        # logging.info(f'accuracy:{metrics.accuracy_score(true, pred):.5f}')
-        # logging.info('Exact match rate (EMR): %.4f\n' %metrics.accuracy_score(true, pred))
-        # logging.info('Precision: %.4f\n' %(np.count_nonzero(true==pred)/pred.shape[0]/pred.shape[1]))
     return outputs, pred, true
 
 def inf_time(model):

@@ -421,7 +421,11 @@ class DataGenerator:
     
     def __init__(self, batch, src_length, device=torch.device('cpu')):
         self.device = device
-        self.src, self.tgt, self.tgt_mask, self.tgt_y, self.ntokens = [i.to(self.device) for i in self.collate(batch, src_length)]
+        datalist = [i for i in self.collate(batch, src_length)]
+        for i in range(len(datalist)):
+            if type(datalist[i]) == torch.Tensor:
+                datalist[i] = datalist[i].to(device)
+        self.src, self.tgt, self.tgt_mask, self.tgt_y, self.ntokens, self.smiles = datalist
         self.batch_size = self.src.size(0)
         self.true_seq = [seq[torch.where(seq!=1)[0]][1:] for seq in self.tgt]
         self.src_length = src_length
@@ -441,34 +445,14 @@ class DataGenerator:
         return torch.triu(torch.ones(sz, sz, dtype=torch.int, device=self.device), diagonal=0)
     
     def collate(self, batch, src_length=None):
-        # if src_length is None:
-        #     src_lengths = torch.tensor([k.shape[-1] for k in batch[0]])
-        # else:
-        #     src_lengths = torch.tensor([src_length for _ in batch[0]])
-        #     src_mask=None
-        #     src = batch[0]
-        # else:
-        src = batch[0]#torch.nn.utils.rnn.pad_sequence(batch[0], batch_first=True, padding_value=self.padding_idx)
-        #src_mask = None self.make_pad_mask(src_lengths, src.size(-1))   # [B,1,1,Ls]
-        tgt = batch[1]['input_ids']
+        src = batch[0]
+        tgt = batch[1]['label']['input_ids']
         tgt_y = tgt[:,1:]
-        # tgt = torch.where(tgt==2, 1, tgt)#torch.vstack([t[:torch.where(t==2)[0]:] for t in tgt])
-        # print(tgt[0], tgt_y[0] )
         tgt = tgt[:, :-1]
-        tgt_pad_mask = batch[1]['attention_mask'][:, :-1]      
-        # seq[torch.where(seq!=1)[0]][1:]
-        # for i in range(len(tgt)):
-        #     eos_id = torch.where(tgt[i]==2)[0]
-        #     tgt[i][eos_id] = 1
-        #     tgt_pad_mask[i][eos_id] = 0
+        tgt_pad_mask = batch[1]['label']['attention_mask'][:, :-1]      
         ntokens = sum([(y!=y[-1]).sum() for y in tgt_y])
-        # tgt = torch.nn.utils.rnn.pad_sequence(tgt, batch_first=True, padding_value=padding_value)
-        # tgt_y = torch.nn.utils.rnn.pad_sequence(tgt_y, batch_first=True, padding_value=padding_value)
-        # tgt_lengths = torch.tensor([j.shape[-1] for j in tgt])
-        # tgt_pad_mask = self.make_pad_mask(tgt_lengths, tgt.size(-1))  # [B,1,1,Lt]
-        # causal_mask = self.make_causal_mask(tgt.size(1))  # [Lt,Lt]
-        # tgt_mask = tgt_pad_mask | causal_mask #tgt_pad_mask  .unsqueeze(0).unsqueeze(0)
-        return src, tgt, tgt_pad_mask, tgt_y, ntokens
+        smiles = batch[1]['smiles']
+        return src, tgt, tgt_pad_mask, tgt_y, ntokens, smiles
     
     
 class Batch:
@@ -577,8 +561,8 @@ class NoamOpt:
              min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
 
-def make_argue(state='🤖: I May... be Paranoid, but... not an... Agent...'):
-    print(state)
+def make_argue(statement='🤖: I May... be Paranoid, but... not an... Agent...'):
+    print(statement)
     
     
 def get_std_opt(model):

@@ -40,14 +40,6 @@
       "rstrip": false,
       "single_word": false,
       "special": true
-    },
-    "5": {
-      "content": "<d>",
-      "lstrip": true,
-      "normalized": false,
-      "rstrip": false,
-      "single_word": false,
-      "special": true
     }
   },
   "bos_token": "<s>",
@@ -61,6 +53,5 @@
   "pad_token": "<pad>",
   "sep_token": "</s>",
   "tokenizer_class": "RobertaTokenizer",
-  "unk_token": "<unk>",
-  "delimiter": "<d>"
+  "unk_token": "<unk>"
 }

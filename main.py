@@ -5,7 +5,7 @@
 """
 
 import os, time, logging, argparse, config, json
-from utils.utils import seed_everything, load_net_state, train_model, test_model, cleanup, get_smiles
+from utils.utils import seed_everything, load_net_state, train_model, test_model, cleanup, get_seq
 import torch.multiprocessing as mp
 mp.set_sharing_strategy('file_system')
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
@@ -44,6 +44,8 @@ def get_args_parser():
                         help="Transformer hidden dimension")  
     parser.add_argument('--n_heads', default=8,
                         help="Number of attention heads")      
+    parser.add_argument('--to_smarts', action='store_true',
+                        help="Generating SMARTS")    
     parser.add_argument('--epoch',
                         help="epochs for training")
     parser.add_argument('--ddp', default=False,
@@ -79,7 +81,7 @@ def main(rank=None, world_size=1, gpu_ids=None):
     params['strategy']['checkpoint'] = torch.load(args.base_model_path, 
                                                   map_location={'cuda:%d' % 0: 'cuda:%d' % rank},
                                                   weights_only=True) if args.base_model_path else None
-
+    params['strategy']['to_smarts'] = args.to_smarts
     ts = time.strftime('%Y-%m-%d_%H_%M', time.localtime())
     ds = args.ds
     net_ = args.net
@@ -92,14 +94,7 @@ def main(rank=None, world_size=1, gpu_ids=None):
     if not os.path.exists(f'logs/{ds}/{net_}'):
         os.mkdir(f'logs/{ds}/{net_}')
 
-    logging.basicConfig(
-        filename=f'logs/{ds}/{net_}/{ts}_{mode}.log',
-        format='%(levelname)s:%(message)s',
-        level=logging.INFO,
-    )
 
-    logging.info({k: v for k, v in args.__dict__.items() if v})
-    save_path = f"checkpoints/{ds}/{net_}/{ts}"
     if mode == 'train':
         if not os.path.exists(f"checkpoints/{ds}"):
             os.mkdir(f"checkpoints/{ds}")
@@ -121,14 +116,25 @@ def main(rank=None, world_size=1, gpu_ids=None):
     N, d_model, h = int(args.depth), int(args.d_model), int(args.n_heads)
     net, src_length = make_model(tgt_vocab, N=N, d_model=d_model, h=h, mode=mode)
     params['strategy']['src_length'] = src_length
-    logging.info(net)
-    logging.info(params)
+    
+    if rank == 0:
+        logging.basicConfig(
+            filename=f'logs/{ds}/{net_}/{ts}_{mode}.log',
+            format='%(levelname)s:%(message)s',
+            level=logging.INFO,
+        )
+
+        logging.info({k: v for k, v in args.__dict__.items() if v})
+        save_path = f"checkpoints/{ds}/{net_}/{ts}"
+        logging.info(net)
+        logging.info(params)
     
     try:
         if mode == 'train' or args.debug or 'pretrain' in mode:
             if args.base_model_path:
                 net = load_net_state(net, params['strategy']['checkpoint']['model_state'])
-            train_model(net, save_path, ds=args.ds, **params['strategy'])
+            pretrain = True if 'pretrain' in mode else False
+            train_model(net, save_path, ds=args.ds, **params['strategy'], pretrain=pretrain)
 
         elif mode == 'tune':
             import torch
@@ -154,9 +160,15 @@ def main(rank=None, world_size=1, gpu_ids=None):
         catch_exception(ds, net_, ts, mode)
 
 if __name__ == "__main__":
+
     if not get_args_parser().mode == 'test':
         gpu_ids = get_args_parser().gpu_ids
-        world_size = len(gpu_ids.split(','))
+        if '-' in gpu_ids:
+            g1, g2 = int(gpu_ids.split('-')[0]), int(gpu_ids.split('-')[1])
+            gpu_ids = str(g1)
+            for i in range(g1+1, g2+1):
+                gpu_ids = gpu_ids + ',' + str(i)
+        world_size = len(gpu_ids.split(','))       
         os.environ["CUDA_VISIBLE_DEVICES"] = gpu_ids
         mp.spawn(main, args=(world_size, gpu_ids), nprocs=world_size)
     else:

@@ -2,9 +2,9 @@ import sys
 sys.path.append('/data/YantiLiu/projects/substructure-ID/datasets')
 
 try: 
-    from Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, LearnablePositionalEncoding, NoamOpt, run_epoch, Variable,  greedy_decode, LabelSmoothing, DataGenerator, LearnableClassEmbedding, PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
+    from Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, NoamOpt, run_epoch, Variable, DataGenerator, LearnableClassEmbedding, PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
 except ModuleNotFoundError:
-    from models.Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, LearnablePositionalEncoding, NoamOpt, run_epoch, Variable,  greedy_decode, LabelSmoothing, DataGenerator, LearnableClassEmbedding, PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
+    from models.Transformer_modules import LayerNorm, EncoderLayer, DecoderLayer, MultiHeadedAttention, PositionwiseFeedForward, NoamOpt, run_epoch, Variable, DataGenerator, LearnableClassEmbedding, PositionalEncoding, EncoderDecoder, Encoder, Decoder, Embeddings, Generator
 import torch
 import torch.nn as nn
 import numpy as np
@@ -19,9 +19,7 @@ class SpectralEncoding(nn.Module):
         self.norm = norm_layer(d_model) if norm_layer else nn.Identity()
 
     def forward(self, x):
-        # try:
         x = self.encoding(x).transpose(1, 2)  # B, C, L -> B, L, C
-        # except RuntimeError:print(x.shape)
         return self.norm(x)
 
 
